@@ -1,0 +1,23 @@
+# iOS / Xcode
+ios/**/.build/
+ios/**/.swiftpm/
+ios/**/DerivedData/
+ios/**/*.xcuserstate
+ios/**/xcuserdata/
+ios/**/.DS_Store
+Package.resolved
+
+# Python
+backend/.venv/
+pc-agent/.venv/
+**/__pycache__/
+*.pyc
+backend/jarvis.db
+backend/.env
+pc-agent/.env
+.pytest_cache/
+.ruff_cache/
+
+# Misc
+.DS_Store
+*.log

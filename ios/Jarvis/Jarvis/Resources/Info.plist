@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>Jarvis</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Jarvis</string>
+	<key>CFBundlePackageType</key>
+	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>jarvisapp</string>
+			</array>
+		</dict>
+	</array>
+	<!-- Begin required section for Device Access Toolkit Apps (see docs/META_SDK_NOTES.md) -->
+	<key>MWDAT</key>
+	<dict>
+		<key>AppLinkURLScheme</key>
+		<string>jarvisapp://</string>
+		<key>MetaAppID</key>
+		<!-- 0 = Developer Mode. Replace with a real APPLICATION_ID for production. -->
+		<string>0</string>
+	</dict>
+	<key>UISupportedExternalAccessoryProtocols</key>
+	<array>
+		<string>com.meta.ar.wearable</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>bluetooth-peripheral</string>
+		<string>external-accessory</string>
+	</array>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Needed to connect to your Ray-Ban Meta glasses.</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>Needed to connect to your Ray-Ban Meta glasses.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Lets your phone find and connect to your glasses over Wi-Fi.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_bonjour._tcp</string>
+	</array>
+	<!-- End required section for Device Access Toolkit Apps -->
+	<key>NSCameraUsageDescription</key>
+	<string>JARVIS uses your glasses' camera (or, in demo mode, no camera at all) only when you explicitly ask it to look at something.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>JARVIS listens only while a visible listening session is active, so it can hear your request.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>JARVIS transcribes your spoken request on-device.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>JARVIS can read upcoming events when you ask what's next, if you enable Calendar in Settings.</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>JARVIS can create reminders when you ask it to, if you enable Reminders in Settings.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>JARVIS can attach a coarse location to a saved memory, if you enable Location in Settings.</string>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+	</dict>
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>arm64</string>
+	</array>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+</dict>
+</plist>
