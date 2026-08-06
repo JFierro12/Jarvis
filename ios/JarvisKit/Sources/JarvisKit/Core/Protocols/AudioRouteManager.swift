@@ -36,4 +36,14 @@ public protocol AudioRouteManager: AnyObject, Sendable {
     var currentRoute: AsyncStream<AudioRoute> { get }
     func activateSession() throws
     func deactivateSession() throws
+
+    /// Bluetooth Classic can't do high-quality stereo output (A2DP) and live
+    /// microphone input (HFP, low-bitrate mono) on the same device at once —
+    /// as long as a Bluetooth accessory's mic is in use, that accessory's
+    /// *output* also gets forced down to HFP quality. `true` prefers a
+    /// connected Bluetooth accessory's mic (e.g. the glasses, while worn);
+    /// `false` prefers the iPhone's own built-in mic, keeping any Bluetooth
+    /// output (music, TTS) at full A2DP quality. Never throws on a missing
+    /// port — falls back to whatever the system already has selected.
+    func setPreferBluetoothInput(_ preferBluetooth: Bool)
 }

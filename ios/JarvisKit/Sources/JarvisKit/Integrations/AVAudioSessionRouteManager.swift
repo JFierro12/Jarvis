@@ -21,13 +21,24 @@ public final class AVAudioSessionRouteManager: NSObject, AudioRouteManager, @unc
     }
 
     public func activateSession() throws {
-        try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetooth, .allowBluetoothA2DP, .defaultToSpeaker])
+        // .mixWithOthers is required here — without it, an active
+        // .playAndRecord session claims exclusive audio focus, which
+        // silently blocks other apps' playback (e.g. Apple Music) for as
+        // long as our own recording session (wake word/STT) is active.
+        try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetooth, .allowBluetoothA2DP, .defaultToSpeaker, .mixWithOthers])
         try session.setActive(true, options: [])
         continuation.yield(resolveCurrentRoute())
     }
 
     public func deactivateSession() throws {
         try session.setActive(false, options: [.notifyOthersOnDeactivation])
+    }
+
+    public func setPreferBluetoothInput(_ preferBluetooth: Bool) {
+        guard let inputs = session.availableInputs else { return }
+        let desiredType: AVAudioSession.Port = preferBluetooth ? .bluetoothHFP : .builtInMic
+        guard let port = inputs.first(where: { $0.portType == desiredType }) else { return }
+        try? session.setPreferredInput(port)
     }
 
     @objc private func routeChanged(_ note: Notification) {

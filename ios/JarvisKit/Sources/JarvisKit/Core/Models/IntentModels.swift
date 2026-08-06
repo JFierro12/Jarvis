@@ -13,7 +13,15 @@ public enum IntentKind: String, Codable, Sendable, CaseIterable {
     case saveNote = "save_note"
     case getPCStatus = "get_pc_status"
     case controlHomeDevice = "control_home_device"
+    case releaseCamera = "release_camera"
+    case reconnectCamera = "reconnect_camera"
+    case wakeUpCheck = "wake_up_check"
+    case shutDown = "shut_down"
+    case startBrowseMode = "start_browse_mode"
+    case stopBrowseMode = "stop_browse_mode"
+    case playGeniusPlaylist = "play_genius_playlist"
     case cancel
+    case endConversation = "end_conversation"
     case confirm
     case reject
     case help

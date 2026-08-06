@@ -9,6 +9,7 @@ dependencies = [
     "pydantic>=2.8",
     "pydantic-settings>=2.4",
     "psutil>=6.0",
+    "pyobjc-framework-Quartz>=10.0",
 ]
 
 [project.optional-dependencies]

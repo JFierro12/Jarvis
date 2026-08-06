@@ -16,9 +16,17 @@ Package version at time of writing: **0.9.0**. Minimum deployment target: **iOS 
 | `MWDATCore` | Device discovery, registration, permissions, device selectors, `Wearables` entry point |
 | `MWDATCamera` | `Camera` capability, `Stream`, `VideoFrame`, photo capture |
 | `MWDATDisplay` | Display capability, layout DSL (`FlexBox`, `Text`, `Button`, `Image`, `Icon`, `VideoPlayer`) — Meta Ray-Ban Display only |
-| `MWDATMockDevice` | `MockDeviceKit`, `MockGlasses`, `MockCameraKit` — simulator testing without hardware |
+| `MWDATMockDevice` | `MockDeviceKit`, `MockGlasses`, `MockCameraKit` — simulator testing without hardware. **Not linked by this project** — see note below. |
 
 A DAT app should only depend on these four modules (per `AGENTS.md`, "Allowed dependencies").
+This project links only `MWDATCore` and `MWDATCamera`. `MWDATMockDevice` was tried and then
+removed: embedding it alongside `MWDATCamera` in the same app target caused an Objective-C
+runtime class collision on a physical device (`SUPMediaStream*` and related symbols defined
+in both frameworks' binaries), logged as `objc[...]: Class ... is implemented in both ...
+This may cause spurious casting failures and mysterious crashes.` Demo mode never actually
+used `MockDeviceKit` in practice (see point 4 below), so nothing was lost by removing it —
+if a future need for `MockDeviceKit` arises, it should go in a separate build target that is
+never linked into the same binary as `MWDATCamera` on-device.
 
 ## Capability matrix
 
@@ -36,7 +44,7 @@ A DAT app should only depend on these four modules (per `AGENTS.md`, "Allowed de
 | Custom wake-word ("Jarvis") support | **Not supported by DAT.** No wake-word or voice-invocation API in any module. | No | No | — | — | — | Absence confirmed by full read of AGENTS.md; no `WakeWord`/`VoiceInvocation` symbol anywhere | `supportsNativeVoiceInvocation` hardcoded `false` | Do not represent third-party wake word as firmware-native |
 | Native voice invocation of a 3P app by the glasses | **Not documented / not supported.** | No | No | — | — | — | Same as above | Capability flag defaults `false` | Re-verify against `CHANGELOG.md` on every SDK bump |
 | Background execution while app is backgrounded | Partially — camera *recording* can continue backgrounded per 0.9.0 changelog ("Camera Access sample: record video with optional sound-in-video, continuing while the app is backgrounded"), but **general background streaming/wake-word is not documented as supported** | Yes (recording only) | Yes | No (for general streaming) | — | — | CHANGELOG.md [0.9.0] Added | Treated as unsupported for JARVIS's continuous-listening use case; only recording-in-progress continuation is verified | Do not build silent-audio keep-alive hacks |
-| MockDeviceKit (`MockDeviceKit.shared`, `pairGlasses(model:)`, `.don()/.doff()`, `setCameraFeed`/`setCapturedImage`) | Yes | Yes | Yes | Yes (simulator/dev) | No | Configurable via `mockPermissions` | AGENTS.md §Testing instructions | Implemented — this is the primary dev/demo backend | Models: `.rayBanMeta`, `.oakleyMetaHSTN`, `.oakleyMetaVanguard`, `.rayBanMetaOptics`, `.metaGlasses` |
+| MockDeviceKit (`MockDeviceKit.shared`, `pairGlasses(model:)`, `.don()/.doff()`, `setCameraFeed`/`setCapturedImage`) | Yes | Yes | Yes | Yes (simulator/dev) | No | Configurable via `mockPermissions` | AGENTS.md §Testing instructions | **Not used** — this project's demo mode runs on a separate hand-written `MockWearableDeviceClient` (pure Swift, no SDK dependency at all), not on MWDATMockDevice/MockDeviceKit; see the module note above | Models: `.rayBanMeta`, `.oakleyMetaHSTN`, `.oakleyMetaVanguard`, `.rayBanMetaOptics`, `.metaGlasses` |
 | Release-channel testing (production, non-Dev-Mode) | Yes, via Wearables Developer Center project + release channel | Yes | Yes | Yes | No | Yes | README.md, AGENTS.md §Permissions | Not exercised (requires a registered org/app) | Needs `APPLICATION_ID` + `ClientToken` + Team ID |
 
 ## What this means for JARVIS's architecture
@@ -53,9 +61,29 @@ A DAT app should only depend on these four modules (per `AGENTS.md`, "Allowed de
 3. **Photo capture is the reliable, low-risk MVP path**; continuous video streaming works
    but is bandwidth/battery-expensive over Bluetooth Classic and is deferred behind
    `enableVideoStreaming` (default off).
-4. **MockDeviceKit is a first-class, permanent dependency**, not a throwaway shim — it is
-   how this project's demo mode and CI-style tests run without hardware, and it is
-   Meta's own recommended testing story.
+4. **Demo mode runs on a pure-Swift mock, not MockDeviceKit.** `MockWearableDeviceClient`
+   has zero dependency on any MWDAT module, which is what let it keep working when
+   `MWDATMockDevice` was removed from the app target entirely (see module note above).
+
+## Verified on physical hardware (2026-08-04)
+
+A real Ray-Ban Meta device, in Developer Mode, was used to exercise the real adapter for the
+first time this session. Findings:
+
+- `Wearables.shared.startRegistration()` throws typed `MWDATCore.RegistrationError` — not a
+  generic `Error` — and `.alreadyRegistered` is a real, expected case hit on every run after
+  the first successful registration (the app was already registered with Meta AI from an
+  earlier attempt). The adapter now catches this specifically and treats it as success rather
+  than aborting the connect flow.
+- `RegistrationState`, `PermissionStatus` (cases: `.granted`, `.denied` — no `.notDetermined`
+  in the real SDK type), and `DeviceSessionState` (cases: `.idle`, `.starting`, `.started`,
+  `.paused`, `.stopping`, `.stopped`) case names are confirmed exactly against the real
+  `MWDATCore.swiftinterface` shipped in the resolved 0.9.0 package — the adapter's stringly-typed
+  placeholder comparisons (`"\(status)" == "granted"` etc.) have been replaced with typed
+  switches over the real enums.
+- Embedding `MWDATMockDevice` alongside `MWDATCamera` in the same app binary crashes on-device
+  at launch with duplicate Objective-C class definitions (see module note above). This was not
+  visible in Simulator builds.
 
 ## Unverified / re-check-before-relying-on
 
@@ -64,10 +92,5 @@ A DAT app should only depend on these four modules (per `AGENTS.md`, "Allowed de
 - Exact behavior of `checkPermissionStatus` when no device has ever been paired.
 - Whether Wi-Fi transport (mentioned in `[0.8.0]` changelog) changes any of the above
   bandwidth/quality tradeoffs for photo capture specifically.
-- Real-hardware timing for `capturePhoto()` round-trip latency (spec targets <1s; only
-  measurable with physical glasses or a MockDeviceKit feed, which does not model BT latency).
-
-None of the physical-hardware behavior above has been verified against real glasses in this
-session — no physical Ray-Ban Meta glasses were available. Everything marked "real adapter
-wired, unverified on hardware" compiles against the documented API surface but has only been
-exercised through `MockDeviceKit`.
+- Real-hardware timing for `capturePhoto()` round-trip latency (spec targets <1s) — not yet
+  measured; connect/register is the only part of the real adapter exercised on hardware so far.

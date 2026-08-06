@@ -12,6 +12,20 @@ public final class PolicyEngine: Sendable {
         self.confirmationWindow = confirmationWindow
     }
 
+    /// Tool names safe to tell a reasoning provider about — i.e. it may
+    /// only ever propose a call the user has actually granted permissions
+    /// for. Read-only tools with no required permissions (like
+    /// `get_current_time`) are always included.
+    public func availableToolNames(grantedPermissions: Set<String>) -> [String] {
+        registry.all
+            .filter { Set($0.requiredPermissions).isSubset(of: grantedPermissions) }
+            .map(\.name)
+    }
+
+    public func riskLevel(for toolName: String) -> RiskLevel? {
+        registry.definition(for: toolName)?.riskLevel
+    }
+
     public func evaluate(_ call: ToolCall, grantedPermissions: Set<String>) -> PolicyDecision {
         guard let definition = registry.definition(for: call.toolName) else {
             return .deny(reason: "Unknown tool: \(call.toolName)")

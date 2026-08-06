@@ -15,6 +15,20 @@ struct MainView: View {
                 Color.black.ignoresSafeArea()
                 VStack(spacing: 24) {
                     header
+                    if case .error(let message) = coordinator.wearableConnectionState {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .multilineTextAlignment(.center)
+                            .accessibilityLabel("Glasses connection error: \(message)")
+                    }
+                    if case .error(let message) = coordinator.gestureControlState {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .multilineTextAlignment(.center)
+                            .accessibilityLabel("Gesture control error: \(message)")
+                    }
                     Spacer()
                     stateText
                     if !coordinator.partialTranscript.isEmpty {
@@ -47,7 +61,7 @@ struct MainView: View {
             }
             .sheet(isPresented: $showingSettings) { SettingsView() }
             .sheet(isPresented: $showingMemories) { MemoriesView() }
-            .sheet(isPresented: $showingDiagnostics) { DiagnosticsView() }
+            .sheet(isPresented: $showingDiagnostics) { DiagnosticsView(coordinator: coordinator) }
         }
     }
 
@@ -60,15 +74,91 @@ struct MainView: View {
                     .foregroundStyle(.orange)
             }
             Spacer()
+            if environment.wakeWordState == .listening {
+                Image(systemName: "waveform")
+                    .foregroundStyle(.blue)
+                    .accessibilityLabel("Listening for the wake phrase")
+                    .accessibilityHint("Say \"Jarvis\" to activate")
+            }
             connectionIndicator
+            gestureControlIndicator
+        }
+    }
+
+    private var gestureControlIndicator: some View {
+        Group {
+            if case .active = coordinator.gestureControlState {
+                Button {
+                    Task { await coordinator.stopBrowseMode() }
+                } label: {
+                    Label("Browsing", systemImage: "hand.point.up.left.fill")
+                        .font(.caption)
+                        .foregroundStyle(.blue)
+                }
+                .accessibilityLabel("Gesture control active")
+                .accessibilityHint("Double tap to stop browsing")
+            }
         }
     }
 
     private var connectionIndicator: some View {
-        Label("Disconnected", systemImage: "eyeglasses")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .accessibilityLabel("Glasses disconnected")
+        Button {
+            Task {
+                if case .connected = coordinator.wearableConnectionState {
+                    await coordinator.disconnectWearable()
+                } else {
+                    await coordinator.connectWearable()
+                }
+            }
+        } label: {
+            Label(connectionLabelText, systemImage: connectionSystemImage)
+                .font(.caption)
+                .foregroundStyle(connectionColor)
+        }
+        .disabled(isConnecting)
+        .accessibilityLabel("Glasses \(connectionLabelText)")
+        .accessibilityHint(connectionAccessibilityHint)
+    }
+
+    private var isConnecting: Bool {
+        if case .connecting = coordinator.wearableConnectionState { return true }
+        return false
+    }
+
+    private var connectionLabelText: String {
+        switch coordinator.wearableConnectionState {
+        case .unavailable: return "Unavailable"
+        case .disconnected: return "Disconnected"
+        case .connecting: return "Connecting…"
+        case .connected: return "Connected"
+        case .paused: return "Paused"
+        case .error: return "Connection error"
+        }
+    }
+
+    private var connectionSystemImage: String {
+        switch coordinator.wearableConnectionState {
+        case .connected: return "eyeglasses"
+        case .connecting: return "arrow.triangle.2.circlepath"
+        case .error: return "exclamationmark.triangle"
+        default: return "eyeglasses"
+        }
+    }
+
+    private var connectionColor: Color {
+        switch coordinator.wearableConnectionState {
+        case .connected: return .green
+        case .error: return .red
+        case .connecting: return .orange
+        default: return .secondary
+        }
+    }
+
+    private var connectionAccessibilityHint: String {
+        if case .connected = coordinator.wearableConnectionState {
+            return "Double tap to disconnect your glasses"
+        }
+        return "Double tap to connect your glasses"
     }
 
     private var stateText: some View {

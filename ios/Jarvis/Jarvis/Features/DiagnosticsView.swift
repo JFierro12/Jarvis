@@ -3,6 +3,7 @@ import JarvisKit
 
 struct DiagnosticsView: View {
     @EnvironmentObject private var environment: AppEnvironment
+    @ObservedObject var coordinator: AssistantCoordinator
     @Environment(\.dismiss) private var dismiss
     @State private var copiedMessage: String?
 
@@ -41,6 +42,17 @@ struct DiagnosticsView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
             }
+        }
+    }
+
+    private var connectionStateText: String {
+        switch environment.coordinator.wearableConnectionState {
+        case .unavailable: return "Unavailable"
+        case .disconnected: return "Disconnected"
+        case .connecting: return "Connecting"
+        case .connected(let model): return "Connected (\(model.rawValue))"
+        case .paused: return "Paused"
+        case .error(let message): return "Error: \(message)"
         }
     }
 

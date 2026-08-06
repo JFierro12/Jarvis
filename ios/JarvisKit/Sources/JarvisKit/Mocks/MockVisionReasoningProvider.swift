@@ -6,12 +6,14 @@ import Foundation
 /// instructions from an unclear image.
 public final class MockVisionReasoningProvider: VisionReasoningProvider, @unchecked Sendable {
     public var scriptedResult: VisionAnalysisResult
+    public private(set) var analyzeCallCount = 0
 
     public init(scriptedResult: VisionAnalysisResult = MockVisionReasoningProvider.defaultResult) {
         self.scriptedResult = scriptedResult
     }
 
     public func analyze(image: CapturedImage, question: String) async throws -> VisionAnalysisResult {
+        analyzeCallCount += 1
         if image.data.isEmpty {
             throw VisionReasoningError.imageUnclear
         }

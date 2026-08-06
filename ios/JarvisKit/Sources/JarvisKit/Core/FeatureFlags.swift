@@ -3,11 +3,19 @@ import Foundation
 /// All flags default conservative (spec §30). Nothing here enables camera,
 /// location, or long-term memory by default in a fresh install — onboarding
 /// is what turns these on, deliberately, one at a time.
-public struct FeatureFlags: Sendable, Equatable {
+public struct FeatureFlags: Sendable, Equatable, Codable {
     public var enableVisualAnalysis: Bool
     public var enableVideoStreaming: Bool
     public var enablePhotoCapture: Bool
     public var enableForegroundWakeWord: Bool
+    /// Keeps wake-word listening running after the app is backgrounded
+    /// (not force-quit) — requires `enableForegroundWakeWord` also being on.
+    /// Uses the `audio` background mode to stay alive, which costs real
+    /// battery and is not guaranteed forever: iOS can still suspend the app
+    /// if it decides the activity doesn't look like genuine ongoing audio
+    /// use. Off by default — this is a deliberate opt-in, not a silent
+    /// always-on microphone.
+    public var enableBackgroundWakeWord: Bool
     public var enableNativeVoiceInvocation: Bool
     public var enableLongTermMemory: Bool
     public var enableLocationContext: Bool
@@ -23,6 +31,7 @@ public struct FeatureFlags: Sendable, Equatable {
         enableVideoStreaming: Bool = false,
         enablePhotoCapture: Bool = true,
         enableForegroundWakeWord: Bool = false,
+        enableBackgroundWakeWord: Bool = false,
         enableNativeVoiceInvocation: Bool = false,
         enableLongTermMemory: Bool = true,
         enableLocationContext: Bool = false,
@@ -37,6 +46,7 @@ public struct FeatureFlags: Sendable, Equatable {
         self.enableVideoStreaming = enableVideoStreaming
         self.enablePhotoCapture = enablePhotoCapture
         self.enableForegroundWakeWord = enableForegroundWakeWord
+        self.enableBackgroundWakeWord = enableBackgroundWakeWord
         self.enableNativeVoiceInvocation = enableNativeVoiceInvocation
         self.enableLongTermMemory = enableLongTermMemory
         self.enableLocationContext = enableLocationContext
@@ -57,6 +67,7 @@ public struct FeatureFlags: Sendable, Equatable {
         enableVideoStreaming: false,
         enablePhotoCapture: true,
         enableForegroundWakeWord: false,
+        enableBackgroundWakeWord: false,
         enableNativeVoiceInvocation: false,
         enableLongTermMemory: true,
         enableLocationContext: false,
