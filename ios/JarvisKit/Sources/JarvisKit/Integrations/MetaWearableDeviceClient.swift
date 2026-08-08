@@ -421,15 +421,82 @@ public final class MetaWearableDeviceClient: WearableDeviceClient, @unchecked Se
             camera = created
             self.camera = camera
         }
+
+        // Same lesson learned hardening attemptCapture(): the SDK/glasses
+        // can remember a camera as already "started" from a stale prior
+        // session, and starting a stream whose camera thinks it's already
+        // running produces no visible effect. Never observed on real
+        // hardware until now — this method previously called stream.start()
+        // and returned immediately with no confirmation it actually took,
+        // which is exactly what let it silently no-op (no LED, no frames,
+        // no error) the first time it was exercised on real glasses.
+        NSLog("[JarvisWearable] startVideoStream() camera.state at entry: \(camera.state)")
+        if camera.state != .stopped {
+            NSLog("[JarvisWearable] startVideoStream() calling resetCameraToStopped()")
+            await resetCameraToStopped(camera)
+            NSLog("[JarvisWearable] startVideoStream() resetCameraToStopped() returned, camera.state now: \(camera.state)")
+        }
+
         let stream = camera.stream
         self.stream = stream
 
-        let token = stream.videoFramePublisher.listen { [weak self] frame in
+        let bag = ListenerTokenBag()
+        let frameToken = stream.videoFramePublisher.listen { [weak self] frame in
             guard let self, let image = frame.makeUIImage(), let data = image.jpegData(compressionQuality: 0.7) else { return }
             self.frameContinuation?.yield(VideoFrame(data: data, timestamp: Date().timeIntervalSince1970, width: Int(image.size.width), height: Int(image.size.height)))
         }
-        listenerTokens.append(token)
-        stream.start()
+        listenerTokens.append(frameToken)
+
+        // Confirm the stream actually reaches .streaming instead of trusting
+        // that stream.start() alone means it worked — mirrors the same
+        // state-wait attemptCapture() already relies on for exactly the
+        // same reason (the stream moves through
+        // .stopped -> .waitingForDevice -> .starting -> .streaming, and
+        // calling start() is fire-and-forget with no guarantee it ever
+        // arrives).
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let resumer = SingleResume(continuation)
+
+            // Armed BEFORE stream.start() below, deliberately — start() is a
+            // synchronous call into the closed-source SDK, and if it blocks
+            // the calling thread natively (not a Swift-concurrency
+            // scheduling delay, an actual native hang), scheduling the
+            // timeout afterward would mean this Task never even gets
+            // created, leaving nothing able to rescue the caller. Arming it
+            // first guarantees a way out regardless of what start() does —
+            // this Task runs independently and can resume the continuation
+            // even if the closure's own thread never returns from start().
+            Task {
+                NSLog("[JarvisWearable] startVideoStream() timeout task armed, sleeping 8s")
+                try? await Task.sleep(nanoseconds: 8_000_000_000)
+                NSLog("[JarvisWearable] startVideoStream() timeout task fired after sleep — resuming with throw")
+                resumer.resume(throwing: WearableClientError.captureFailed("Timed out waiting for the camera stream to start."))
+                NSLog("[JarvisWearable] startVideoStream() timeout task: resume(throwing:) call returned")
+            }
+
+            let stateToken = stream.statePublisher.listen { state in
+                NSLog("[JarvisWearable] startVideoStream() stream state: \(state)")
+                if state == .streaming {
+                    resumer.resume(returning: ())
+                }
+            }
+            bag.insert(stateToken)
+
+            let errorToken = stream.errorPublisher.listen { streamError in
+                NSLog("[JarvisWearable] startVideoStream() stream errorPublisher fired: \(streamError)")
+                resumer.resume(throwing: WearableClientError.captureFailed(streamError.errorDescription ?? "\(streamError)"))
+            }
+            bag.insert(errorToken)
+
+            NSLog("[JarvisWearable] startVideoStream() about to call stream.start(), stream.state=\(stream.state)")
+            stream.start()
+            NSLog("[JarvisWearable] startVideoStream() stream.start() returned, stream.state=\(stream.state)")
+            if stream.state == .streaming {
+                resumer.resume(returning: ())
+            }
+        }
+        NSLog("[JarvisWearable] startVideoStream() continuation resumed, exiting function")
+        Task { await bag.cancelAll() }
     }
 
     public func stopVideoStream() async {

@@ -51,9 +51,13 @@ public final class LiveHandGestureController: HandGestureController, @unchecked 
         classifier.reset()
 
         do {
+            NSLog("[JarvisGesture] start() calling gestureStreamClient.connect()")
             try await gestureStreamClient.connect()
+            NSLog("[JarvisGesture] connect() succeeded, calling wearableClient.startVideoStream()")
             try await wearableClient.startVideoStream(configuration: streamConfiguration)
+            NSLog("[JarvisGesture] startVideoStream() succeeded")
         } catch {
+            NSLog("[JarvisGesture] start() threw: \(error)")
             currentState = .error(error.localizedDescription)
             stateContinuation.yield(currentState)
             throw error

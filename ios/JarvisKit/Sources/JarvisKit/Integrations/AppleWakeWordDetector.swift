@@ -49,24 +49,17 @@ public final class AppleWakeWordDetector: NSObject, WakeWordDetector, @unchecked
         self.stateContinuation = continuation
         super.init()
         stateContinuation.yield(.idle)
-        // Bluetooth route changes (e.g. the glasses connecting/disconnecting,
-        // or the OS renegotiating HFP) can happen at any time, not just when
-        // this app explicitly changes the preferred input — including the
-        // "API MISUSE: CBCentralManager..." reconnection churn seen
-        // throughout this app's logs. A tap installed against a stale format
-        // crashes with an uncatchable CoreAudio NSException the next time
-        // the engine renders audio ("Input HW format and tap format not
-        // matching") — Swift's try/catch cannot intercept an NSException, so
-        // the only real fix is to never let the tap go stale: rebuild it
-        // whenever the engine reports its configuration actually changed.
-        NotificationCenter.default.addObserver(self, selector: #selector(handleConfigurationChange), name: .AVAudioEngineConfigurationChange, object: audioEngine)
-    }
-
-    @objc private func handleConfigurationChange(_ note: Notification) {
-        engineQueue.async { [weak self] in
-            guard let self, self.isRunning else { return }
-            self.beginListeningCycle()
-        }
+        // NOTE: previously registered an AVAudioEngineConfigurationChange
+        // observer here that called beginListeningCycle() on every fire, to
+        // defend against a stale-tap CoreAudio crash. Reverted — starting
+        // the engine can itself trigger that same notification as a normal
+        // side effect, and restarting in response created a self-sustaining
+        // feedback loop (restart -> notification -> restart -> ...) that
+        // killed every recognition task before it could report a result,
+        // breaking wake-word detection entirely. The original crash this
+        // was meant to prevent is still covered by seeding
+        // AppEnvironment.lastAppliedPreferBluetoothInput correctly (the
+        // actual confirmed trigger) — see AppEnvironment.swift.
     }
 
     /// Requests both permissions this feature needs — speech recognition

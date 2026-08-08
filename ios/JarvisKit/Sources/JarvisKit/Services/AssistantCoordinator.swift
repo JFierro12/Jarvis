@@ -139,11 +139,15 @@ public final class AssistantCoordinator: ObservableObject {
             await respond(Self.gestureInstructions)
         }
         do {
+            NSLog("[JarvisCoordinator] resolveBrowseDirectionsAnswer: calling handGestureController.start()")
             try await handGestureController.start()
+            NSLog("[JarvisCoordinator] resolveBrowseDirectionsAnswer: start() succeeded")
             await respond("Enjoy your browse, sir.")
         } catch {
+            NSLog("[JarvisCoordinator] resolveBrowseDirectionsAnswer: start() threw: \(error)")
             await respond("I couldn't start gesture control, sir.")
         }
+        NSLog("[JarvisCoordinator] resolveBrowseDirectionsAnswer: about to move to .completed")
         move(to: .completed)
         stateMachine.reset()
         state = .idle
