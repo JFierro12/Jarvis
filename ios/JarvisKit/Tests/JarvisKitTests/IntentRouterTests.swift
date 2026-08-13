@@ -61,6 +61,24 @@ final class IntentRouterTests: XCTestCase {
         XCTAssertEqual(router.route("exit browse mode").intent, .stopBrowseMode)
     }
 
+    func testIdentifyCoverageRequiresVisualContext() {
+        let result = router.route("identify the coverage")
+        XCTAssertEqual(result.intent, .identifyCoverage)
+        XCTAssertTrue(result.requiresVisualContext)
+    }
+
+    func testIdentifyCoverageDoesNotCollideWithAnalyzeScene() {
+        XCTAssertEqual(router.route("what coverage is this").intent, .identifyCoverage)
+        XCTAssertEqual(router.route("what am I looking at").intent, .analyzeScene)
+    }
+
+    func testFootballAnalysisModeStartAndStop() {
+        XCTAssertEqual(router.route("football mode").intent, .startFootballAnalysisMode)
+        XCTAssertEqual(router.route("start football analysis").intent, .startFootballAnalysisMode)
+        XCTAssertEqual(router.route("stop football mode").intent, .stopFootballAnalysisMode)
+        XCTAssertEqual(router.route("exit football mode").intent, .stopFootballAnalysisMode)
+    }
+
     func testGeniusPlaylistTrigger() {
         XCTAssertEqual(router.route("Let's remind everyone who the genius in the room is").intent, .playGeniusPlaylist)
         XCTAssertEqual(router.route("who's the genius in the room").intent, .playGeniusPlaylist)

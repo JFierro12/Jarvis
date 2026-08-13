@@ -7,6 +7,7 @@ import Foundation
 public final class MockVisionReasoningProvider: VisionReasoningProvider, @unchecked Sendable {
     public var scriptedResult: VisionAnalysisResult
     public private(set) var analyzeCallCount = 0
+    public private(set) var lastQuestion: String?
 
     public init(scriptedResult: VisionAnalysisResult = MockVisionReasoningProvider.defaultResult) {
         self.scriptedResult = scriptedResult
@@ -14,6 +15,7 @@ public final class MockVisionReasoningProvider: VisionReasoningProvider, @unchec
 
     public func analyze(image: CapturedImage, question: String) async throws -> VisionAnalysisResult {
         analyzeCallCount += 1
+        lastQuestion = question
         if image.data.isEmpty {
             throw VisionReasoningError.imageUnclear
         }

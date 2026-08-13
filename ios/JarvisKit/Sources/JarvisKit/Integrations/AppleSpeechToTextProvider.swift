@@ -72,7 +72,14 @@ public final class AppleSpeechToTextProvider: NSObject, SpeechToTextProvider, @u
                 var hasFinished = false
                 let sessionStartedAt = Date()
                 let silenceThreshold: Float = 0.015
-                let silenceDuration: TimeInterval = 0.5
+                // Was tightened to 0.5s at some point for snappy short
+                // commands ("what am I looking at", "shut down") without
+                // updating the comment above — too aggressive for a
+                // thoughtful verbal description with natural pauses between
+                // clauses (e.g. describing a coverage), which was getting
+                // cut off mid-thought. Restored to what was actually
+                // documented as intended.
+                let silenceDuration: TimeInterval = 1.5
                 let minimumListenDuration: TimeInterval = 0.6
                 // All engine control and continuation-finishing happens on
                 // this single queue — the tap callback runs on a real-time
