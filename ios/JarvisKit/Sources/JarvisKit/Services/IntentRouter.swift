@@ -18,6 +18,13 @@ public final class IntentRouter: Sendable {
 
     private let patterns: [Pattern] = [
         Pattern(intent: .analyzeScene, keywords: ["what am i looking at", "what is this", "what's this", "identify this"], requiresVisualContext: true, requiresLocation: false, requiresConfirmation: false),
+        // Distinct from .analyzeScene's generic "identify this" — this is a
+        // dedicated trigger for the football-coverage breakdown, not left
+        // to chance on whether the model notices football content under a
+        // blanket "what am I looking at". Same camera/capture path as
+        // every other requiresVisualContext intent; only the question sent
+        // to the vision provider differs (see AssistantCoordinator).
+        Pattern(intent: .identifyCoverage, keywords: ["identify the coverage", "identify coverage", "what coverage is this", "what's the coverage", "what is the coverage"], requiresVisualContext: true, requiresLocation: false, requiresConfirmation: false),
         Pattern(intent: .readText, keywords: ["read this", "read the", "what does this error", "summarize this page"], requiresVisualContext: true, requiresLocation: false, requiresConfirmation: false),
         Pattern(intent: .rememberScene, keywords: ["remember this", "remember where", "save this as a project note", "remember my"], requiresVisualContext: true, requiresLocation: true, requiresConfirmation: false),
         // "browsing".contains("browse") is true, so .stopBrowseMode must be
@@ -36,6 +43,11 @@ public final class IntentRouter: Sendable {
         Pattern(intent: .reconnectCamera, keywords: ["connect the camera", "reconnect the camera", "connect your camera", "turn the camera back on", "turn on the camera", "camera on", "reconnect the glasses", "connect the glasses"], requiresVisualContext: false, requiresLocation: false, requiresConfirmation: false),
         Pattern(intent: .wakeUpCheck, keywords: ["are you awake", "are you up", "you up", "you awake"], requiresVisualContext: false, requiresLocation: false, requiresConfirmation: false),
         Pattern(intent: .playGeniusPlaylist, keywords: ["who the genius in the room is", "genius in the room"], requiresVisualContext: false, requiresLocation: false, requiresConfirmation: false),
+        // "stop football mode".contains("football mode") is true, so the
+        // stop pattern must be listed first (first-match-wins) — same
+        // ordering constraint as browse mode's start/stop pair.
+        Pattern(intent: .stopFootballAnalysisMode, keywords: ["stop football mode", "exit football mode", "end football mode", "end football analysis"], requiresVisualContext: false, requiresLocation: false, requiresConfirmation: false),
+        Pattern(intent: .startFootballAnalysisMode, keywords: ["football analysis mode", "football mode", "start football analysis"], requiresVisualContext: false, requiresLocation: false, requiresConfirmation: false),
         Pattern(intent: .shutDown, keywords: ["shut down", "shutdown"], requiresVisualContext: false, requiresLocation: false, requiresConfirmation: false),
         Pattern(intent: .controlHomeDevice, keywords: ["turn off", "turn on", "dim", "set the light"], requiresVisualContext: false, requiresLocation: false, requiresConfirmation: true),
         Pattern(intent: .endConversation, keywords: ["thank you jarvis", "thank you, jarvis", "thank you sir", "thank you, sir", "thanks jarvis", "thanks sir", "that will be all", "that'll be all", "that is all", "that's all", "we're done here", "i'm done here"], requiresVisualContext: false, requiresLocation: false, requiresConfirmation: false),

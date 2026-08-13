@@ -40,7 +40,12 @@ public final class CloudLanguageReasoningProvider: LanguageReasoningProvider, @u
                 question: request.question,
                 availableTools: request.availableTools
             )
-            let response: ResponseBody = try await client.post(path: "/v1/reason", body: body, timeout: 15)
+            // 15s was sized for the one-or-two-sentence default; bumped so
+            // the verbal football-coverage exception (see the backend's
+            // anthropic_reasoning.py system prompt) has room for a full
+            // breakdown without the same truncate-and-report-unavailable
+            // bug the vision endpoint had at its old 15s.
+            let response: ResponseBody = try await client.post(path: "/v1/reason", body: body, timeout: 25)
             let toolCall = response.proposedToolCall.map { ToolCall(toolName: $0.toolName, arguments: $0.arguments, target: $0.target) }
             return ReasoningResponse(spokenAnswer: response.spokenAnswer, proposedToolCall: toolCall, requiresConfirmation: response.requiresConfirmation)
         } catch BackendAPIError.requestFailed, BackendAPIError.decodingFailed {

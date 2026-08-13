@@ -23,10 +23,17 @@ public final class CloudVisionReasoningProvider: VisionReasoningProvider, @unche
 
     public func analyze(image: CapturedImage, question: String) async throws -> VisionAnalysisResult {
         do {
+            // 15s was sized for the old low-effort/1024-token vision calls.
+            // The football-coverage breakdown (effort: high, 4096 tokens on
+            // the backend — see anthropic_vision.py) can legitimately take
+            // longer than that to reason through and write; a too-short
+            // client timeout was cutting those off and reporting "vision
+            // analysis unavailable" even when the backend would have
+            // returned a good answer given a few more seconds.
             let response: ResponseBody = try await client.post(
                 path: "/v1/vision/analyze",
                 body: RequestBody(imageBase64: image.data.base64EncodedString(), question: question),
-                timeout: 15
+                timeout: 45
             )
             return VisionAnalysisResult(
                 answer: response.answer,

@@ -43,6 +43,13 @@ public final class AssistantCoordinator: ObservableObject {
     /// would mean fabricating a fake `toolName`/`riskLevel`.
     private var awaitingBrowseDirectionsAnswer = false
 
+    /// While active, every utterance (except the escape hatches — see
+    /// performTurn) is treated as coach's-shorthand pre-snap input instead
+    /// of going through normal intent routing. Persists across
+    /// .cancel/.endConversation deliberately — cleared only by .shutDown —
+    /// so the user doesn't have to re-enter it between plays.
+    private var footballAnalysisModeActive = false
+
     public init(
         wearableClient: WearableDeviceClient,
         speechToText: SpeechToTextProvider,
@@ -165,6 +172,30 @@ public final class AssistantCoordinator: ObservableObject {
         state = .idle
     }
 
+    private func handleStartFootballAnalysisMode() async {
+        if footballAnalysisModeActive {
+            await respond("Already in football mode, sir.")
+        } else {
+            footballAnalysisModeActive = true
+            await respond("Football mode, sir. Give me the read.")
+        }
+        move(to: .completed)
+        stateMachine.reset()
+        state = .idle
+    }
+
+    private func handleStopFootballAnalysisMode() async {
+        if footballAnalysisModeActive {
+            footballAnalysisModeActive = false
+            await respond("Out of football mode, sir.")
+        } else {
+            await respond("I wasn't in football mode, sir.")
+        }
+        move(to: .completed)
+        stateMachine.reset()
+        state = .idle
+    }
+
     private static let geniusPlaylistName = "Genius, Billionaire, Playboy, Philanthropist"
 
     private func handlePlayGeniusPlaylist() async {
@@ -264,6 +295,23 @@ public final class AssistantCoordinator: ObservableObject {
 
         let intent = intentRouter.route(transcript)
 
+        // Football analysis mode intercepts before normal routing so the
+        // user never has to say "identify the coverage" before every
+        // shorthand read — the whole point is minimum words, maximum
+        // speed. Escape hatches (its own stop phrase, cancel,
+        // end-conversation, shut down) still route normally so the user
+        // is never stuck unable to say anything else.
+        if footballAnalysisModeActive,
+           intent.intent != .stopFootballAnalysisMode,
+           intent.intent != .startFootballAnalysisMode,
+           intent.intent != .cancel,
+           intent.intent != .endConversation,
+           intent.intent != .shutDown {
+            let shorthandIntent = IntentResult(intent: .footballShorthandAnalysis, confidence: 1.0)
+            await handle(intent: shorthandIntent, transcript: transcript)
+            return mode == .foregroundWakeWord
+        }
+
         switch intent.intent {
         case .confirm, .reject:
             if awaitingBrowseDirectionsAnswer {
@@ -351,11 +399,22 @@ public final class AssistantCoordinator: ObservableObject {
         case .shutDown:
             await handGestureController.stop()
             await disconnectWearable()
+            // A full reset, unlike .cancel/.endConversation which
+            // deliberately leave football mode active — the whole point is
+            // not needing to re-enter it between plays during one sitting,
+            // but "shut down" means the session itself is ending.
+            footballAnalysisModeActive = false
             await respond("Shutting down, sir.")
             move(to: .completed)
             stateMachine.reset()
             state = .idle
             return false
+        case .startFootballAnalysisMode:
+            await handleStartFootballAnalysisMode()
+            return mode == .foregroundWakeWord
+        case .stopFootballAnalysisMode:
+            await handleStopFootballAnalysisMode()
+            return mode == .foregroundWakeWord
         case .playGeniusPlaylist:
             // Unlike other commands, this deliberately ends the conversation
             // instead of continuing to listen — once the music starts, the
@@ -423,7 +482,15 @@ public final class AssistantCoordinator: ObservableObject {
                 NSLog("[JarvisVisual] calling capturePhoto()")
                 let image = try await wearableClient.capturePhoto()
                 NSLog("[JarvisVisual] capturePhoto() succeeded, \(image.data.count) bytes; calling visionProvider.analyze()")
-                let question = intent.parameters["question"] ?? transcript
+                // "identify the coverage" always sends the same explicit,
+                // detailed ask regardless of how the user phrased the
+                // trigger — the backend's football-analysis prompt already
+                // keys off image content, but reinforcing it here means the
+                // model commits to the full OC-level breakdown immediately
+                // instead of depending on it alone to infer that's wanted.
+                let question = intent.intent == .identifyCoverage
+                    ? "Identify the defensive coverage shown in this football play and give a full offensive-coordinator-level breakdown: personnel and formation, the coverage shell with your reasoning for it, why the defense is likely in this look, and the quarterback's progression against it."
+                    : (intent.parameters["question"] ?? transcript)
                 let analysis = try await visionProvider.analyze(image: image, question: question)
                 NSLog("[JarvisVisual] analyze() succeeded: \(analysis.answer)")
                 visualDescription = analysis.answer
@@ -468,7 +535,15 @@ public final class AssistantCoordinator: ObservableObject {
         let context = contextAssembler.assemble(for: intent, transcript: transcript, visualDescription: visualDescription)
         do {
             let availableTools = policyEngine.availableToolNames(grantedPermissions: grantedPermissions)
-            let response = try await languageProvider.reason(ReasoningRequest(context: context, question: transcript, availableTools: availableTools))
+            // Football mode wraps the raw shorthand with explicit framing —
+            // the backend prompt knows the shorthand grammar, but naming it
+            // here means the model commits immediately instead of spending
+            // a beat deciding whether "2 high, Left Corner 5..." is even a
+            // football question.
+            let question = intent.intent == .footballShorthandAnalysis
+                ? "Coach's shorthand pre-snap read: \"\(transcript)\". Give the coverage read and how the offense should attack it — as fast and dense as possible, this needs to land before the snap."
+                : transcript
+            let response = try await languageProvider.reason(ReasoningRequest(context: context, question: question, availableTools: availableTools))
             if let proposedCall = response.proposedToolCall {
                 await authorizeAndMaybeExecute(proposedCall, spokenAnswer: response.spokenAnswer)
             } else {

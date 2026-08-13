@@ -92,6 +92,142 @@ final class AssistantCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.state, .idle)
     }
 
+    func testIdentifyCoverageSendsExplicitCoverageQuestionThroughSameCapturePath() async {
+        let tts = MockTextToSpeechProvider()
+        let vision = MockVisionReasoningProvider(scriptedResult: VisionAnalysisResult(
+            answer: "Two-high shell, Cover 4 quarters to the field...",
+            confidence: 0.75
+        ))
+        let coordinator = AssistantCoordinator(
+            wearableClient: MockWearableDeviceClient(demoImageData: Data([0xFF, 0xD8])),
+            speechToText: MockSpeechToTextProvider(),
+            textToSpeech: tts,
+            visionProvider: vision,
+            languageProvider: MockLanguageReasoningProvider(),
+            memoryRepository: InMemoryMemoryRepository(),
+            toolExecutor: MockToolExecutor(memoryRepository: InMemoryMemoryRepository())
+        )
+
+        await coordinator.activate(mode: .pushToTalk, spokenText: "identify the coverage")
+
+        XCTAssertEqual(vision.analyzeCallCount, 1, "must go through the same capturePhoto()/analyze() path as every other visual-context intent")
+        XCTAssertEqual(vision.lastQuestion, "Identify the defensive coverage shown in this football play and give a full offensive-coordinator-level breakdown: personnel and formation, the coverage shell with your reasoning for it, why the defense is likely in this look, and the quarterback's progression against it.")
+        XCTAssertEqual(tts.spokenUtterances.last, "Two-high shell, Cover 4 quarters to the field...")
+    }
+
+    // MARK: - Football analysis mode
+
+    func testFootballModeEntryPrompt() async {
+        let tts = MockTextToSpeechProvider()
+        let coordinator = AssistantCoordinator(
+            wearableClient: MockWearableDeviceClient(),
+            speechToText: MockSpeechToTextProvider(),
+            textToSpeech: tts,
+            visionProvider: MockVisionReasoningProvider(),
+            languageProvider: MockLanguageReasoningProvider(),
+            memoryRepository: InMemoryMemoryRepository(),
+            toolExecutor: MockToolExecutor(memoryRepository: InMemoryMemoryRepository())
+        )
+
+        await coordinator.activate(mode: .pushToTalk, spokenText: "football mode")
+
+        XCTAssertEqual(tts.spokenUtterances.last, "Football mode, sir. Give me the read.")
+    }
+
+    func testFootballModeInterceptsShorthandWithoutNeedingACommandPhrase() async {
+        let tts = MockTextToSpeechProvider()
+        let language = MockLanguageReasoningProvider(scriptedResponse: ReasoningResponse(spokenAnswer: "Two-high shell, quarters look..."))
+        let coordinator = AssistantCoordinator(
+            wearableClient: MockWearableDeviceClient(),
+            speechToText: MockSpeechToTextProvider(),
+            textToSpeech: tts,
+            visionProvider: MockVisionReasoningProvider(),
+            languageProvider: language,
+            memoryRepository: InMemoryMemoryRepository(),
+            toolExecutor: MockToolExecutor(memoryRepository: InMemoryMemoryRepository())
+        )
+
+        await coordinator.activate(mode: .pushToTalk, spokenText: "football mode")
+        await coordinator.activate(mode: .pushToTalk, spokenText: "2 high, Left Corner 5, Right Corner 7, 3 in the box 4 up front")
+
+        XCTAssertEqual(
+            language.lastRequest?.question,
+            "Coach's shorthand pre-snap read: \"2 high, Left Corner 5, Right Corner 7, 3 in the box 4 up front\". Give the coverage read and how the offense should attack it — as fast and dense as possible, this needs to land before the snap."
+        )
+        XCTAssertEqual(tts.spokenUtterances.last, "Two-high shell, quarters look...")
+    }
+
+    func testFootballModeStopExitsAndStopsIntercepting() async {
+        let tts = MockTextToSpeechProvider()
+        let language = MockLanguageReasoningProvider()
+        let coordinator = AssistantCoordinator(
+            wearableClient: MockWearableDeviceClient(),
+            speechToText: MockSpeechToTextProvider(),
+            textToSpeech: tts,
+            visionProvider: MockVisionReasoningProvider(),
+            languageProvider: language,
+            memoryRepository: InMemoryMemoryRepository(),
+            toolExecutor: MockToolExecutor(memoryRepository: InMemoryMemoryRepository())
+        )
+
+        await coordinator.activate(mode: .pushToTalk, spokenText: "football mode")
+        await coordinator.activate(mode: .pushToTalk, spokenText: "stop football mode")
+
+        XCTAssertEqual(tts.spokenUtterances.last, "Out of football mode, sir.")
+
+        // No longer active — an ordinary question should route normally,
+        // not get wrapped as a shorthand read.
+        await coordinator.activate(mode: .pushToTalk, spokenText: "what time is it")
+        XCTAssertEqual(language.lastRequest?.question, "what time is it")
+    }
+
+    func testFootballModeEscapeHatchCancelStillWorksWhileActive() async {
+        let tts = MockTextToSpeechProvider()
+        let coordinator = AssistantCoordinator(
+            wearableClient: MockWearableDeviceClient(),
+            speechToText: MockSpeechToTextProvider(),
+            textToSpeech: tts,
+            visionProvider: MockVisionReasoningProvider(),
+            languageProvider: MockLanguageReasoningProvider(),
+            memoryRepository: InMemoryMemoryRepository(),
+            toolExecutor: MockToolExecutor(memoryRepository: InMemoryMemoryRepository())
+        )
+
+        await coordinator.activate(mode: .pushToTalk, spokenText: "football mode")
+        await coordinator.activate(mode: .pushToTalk, spokenText: "cancel")
+
+        XCTAssertEqual(tts.spokenUtterances.last, "Okay, sir.", "cancel must still route normally instead of being swallowed as a shorthand read")
+    }
+
+    func testFootballModePersistsAcrossEndConversationButNotShutDown() async {
+        let tts = MockTextToSpeechProvider()
+        let language = MockLanguageReasoningProvider()
+        let coordinator = AssistantCoordinator(
+            wearableClient: MockWearableDeviceClient(),
+            speechToText: MockSpeechToTextProvider(),
+            textToSpeech: tts,
+            visionProvider: MockVisionReasoningProvider(),
+            languageProvider: language,
+            memoryRepository: InMemoryMemoryRepository(),
+            toolExecutor: MockToolExecutor(memoryRepository: InMemoryMemoryRepository())
+        )
+
+        await coordinator.activate(mode: .pushToTalk, spokenText: "football mode")
+        await coordinator.activate(mode: .pushToTalk, spokenText: "thank you jarvis")
+
+        // Still active after a normal end-of-conversation — a shorthand
+        // read should still get intercepted without re-entering the mode.
+        await coordinator.activate(mode: .pushToTalk, spokenText: "1 high, nickel")
+        XCTAssertTrue(language.lastRequest?.question.hasPrefix("Coach's shorthand pre-snap read:") ?? false)
+
+        await coordinator.activate(mode: .pushToTalk, spokenText: "shut down")
+
+        // Cleared by shut down — the same question now routes as an
+        // ordinary open-ended question, not a shorthand read.
+        await coordinator.activate(mode: .pushToTalk, spokenText: "1 high, nickel")
+        XCTAssertEqual(language.lastRequest?.question, "1 high, nickel")
+    }
+
     // MARK: - Browse mode (hand-gesture control)
 
     func testBrowseOffersDirections() async {

@@ -5,6 +5,7 @@ import Foundation
 /// confidence floor) falls through to `LanguageReasoningProvider`.
 public enum IntentKind: String, Codable, Sendable, CaseIterable {
     case analyzeScene = "analyze_scene"
+    case identifyCoverage = "identify_coverage"
     case readText = "read_text"
     case rememberScene = "remember_scene"
     case searchMemory = "search_memory"
@@ -20,6 +21,13 @@ public enum IntentKind: String, Codable, Sendable, CaseIterable {
     case startBrowseMode = "start_browse_mode"
     case stopBrowseMode = "stop_browse_mode"
     case playGeniusPlaylist = "play_genius_playlist"
+    case startFootballAnalysisMode = "start_football_analysis_mode"
+    case stopFootballAnalysisMode = "stop_football_analysis_mode"
+    /// Synthetic — never produced by IntentRouter's keyword matching.
+    /// AssistantCoordinator constructs this directly for any utterance
+    /// heard while football analysis mode is active, so the user never has
+    /// to say "identify the coverage" before every shorthand read.
+    case footballShorthandAnalysis = "football_shorthand_analysis"
     case cancel
     case endConversation = "end_conversation"
     case confirm
