@@ -34,7 +34,15 @@ public final class BackendAPIClient: @unchecked Sendable {
         if let token = tokenProvider() {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
-        request.httpBody = try JSONEncoder().encode(body)
+        // The backend is FastAPI/Pydantic, which serializes and expects
+        // snake_case field names by default (spoken_answer,
+        // proposed_tool_call, available_tools, ...) — without these
+        // strategies, every response silently fails to decode (requests
+        // can still succeed with a 200 if the mismatched fields happen to
+        // have server-side defaults, which is exactly what masked this).
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        request.httpBody = try encoder.encode(body)
 
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
@@ -42,7 +50,9 @@ public final class BackendAPIClient: @unchecked Sendable {
             throw BackendAPIError.requestFailed(status)
         }
         do {
-            return try JSONDecoder().decode(Response.self, from: data)
+            let decoder = JSONDecoder()
+            decoder.keyDecodingStrategy = .convertFromSnakeCase
+            return try decoder.decode(Response.self, from: data)
         } catch {
             throw BackendAPIError.decodingFailed
         }

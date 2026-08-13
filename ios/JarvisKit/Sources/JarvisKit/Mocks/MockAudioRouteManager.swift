@@ -11,8 +11,14 @@ public final class MockAudioRouteManager: AudioRouteManager, @unchecked Sendable
         self.continuation.yield(initialRoute)
     }
 
+    public private(set) var preferBluetoothInputCalls: [Bool] = []
+
     public func activateSession() throws {}
     public func deactivateSession() throws {}
+
+    public func setPreferBluetoothInput(_ preferBluetooth: Bool) {
+        preferBluetoothInputCalls.append(preferBluetooth)
+    }
 
     public func simulateRouteChange(_ route: AudioRoute) {
         continuation.yield(route)

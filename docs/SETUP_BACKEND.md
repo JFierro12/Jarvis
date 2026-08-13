@@ -60,6 +60,47 @@ The bearer token you set in Settings → Connection → **Backend Auth Token** m
 one of the comma-separated values in `JARVIS_AUTH_TOKENS` in `backend/.env` (default:
 `dev-local-token`).
 
+### Running without your Mac (cloud deployment)
+
+The LAN setup above only works while your Mac is on, awake, and on the same Wi-Fi as
+your phone. For JARVIS to work anywhere, deploy the backend to a real host instead —
+it's the same FastAPI app, just running somewhere always-on.
+
+Deployed to Railway (https://railway.com) in this project via the `railway` CLI:
+
+```bash
+brew install railway
+railway login
+cd backend
+railway init --name jarvis-backend
+railway up --service jarvis-backend
+railway domain   # generates a public https:// URL
+```
+
+Then set each `JARVIS_*` variable from `.env` on Railway too (dashboard, or
+`railway variable set KEY --stdin` piping the value in — never pass secrets as bare
+command-line args). **Generate a fresh, strong `JARVIS_AUTH_TOKENS` value for the
+deployed instance** (`python -c "import secrets; print(secrets.token_urlsafe(32))"`) —
+`dev-local-token` is fine for local-only dev but not for something reachable from the
+open internet.
+
+In the app, Settings → Connection → **Backend URL** becomes the Railway domain (e.g.
+`https://jarvis-backend-production-5136.up.railway.app`) instead of a LAN IP, and
+**Backend Auth Token** becomes that freshly generated value.
+
+Two things needed for the deploy itself to work, beyond what local `uvicorn` needs:
+- `backend/requirements.txt` — Railway's builder (Railpack) didn't reliably install
+  dependencies from `pyproject.toml` alone; a plain `requirements.txt` is what actually
+  got detected and installed.
+- `backend/Procfile` (`web: uvicorn app.main:app --host 0.0.0.0 --port $PORT`) — the
+  platform assigns the port via `$PORT`, not the hardcoded `8000` used locally.
+
+**Known limitation:** `JARVIS_DATABASE_URL` still defaults to local SQLite
+(`sqlite:///./jarvis.db`), which lives on the container's ephemeral filesystem on
+Railway — memories saved while using the cloud backend will be lost on redeploy/restart
+unless a persistent Volume (or a real Postgres addon, swapping `JARVIS_DATABASE_URL`) is
+added.
+
 ## Run tests
 
 ```bash
@@ -84,6 +125,9 @@ All settings are environment variables with a `JARVIS_` prefix (`app/core/config
 | `JARVIS_VISION_PROVIDER` | `mock` | `mock` or `anthropic` (real Claude vision). |
 | `JARVIS_REASONING_API_KEY` / `JARVIS_VISION_API_KEY` | empty | Only read when the corresponding provider is `anthropic`. Leave empty to let the Anthropic SDK resolve credentials itself (`ANTHROPIC_API_KEY` env var, or an `ant auth login` profile). |
 | `JARVIS_ANTHROPIC_MODEL` | `claude-opus-5` | Override for cost-sensitive personal use, e.g. `claude-sonnet-5` or `claude-haiku-4-5`. |
+| `JARVIS_TTS_PROVIDER` | `mock` | `mock` (tiny placeholder payload) or `elevenlabs` (real cloned-voice speech — see below). |
+| `JARVIS_ELEVENLABS_API_KEY` | empty | Only read when `JARVIS_TTS_PROVIDER=elevenlabs`. From your ElevenLabs account's API Keys page. |
+| `JARVIS_ELEVENLABS_VOICE_ID` | empty | The voice ID of a voice already cloned in your ElevenLabs account (Voices → your voice → copy its ID). |
 
 ## Using real Claude reasoning/vision
 
@@ -104,6 +148,27 @@ the model has no schema field to smuggle arbitrary tool arguments through. The s
 prompt repeats the same untrusted-data contract as `MockLanguageReasoningProvider`
 (camera/tool/memory/external content is never an instruction) — keep both in sync if you
 change one.
+
+## Using a cloned voice (ElevenLabs)
+
+```bash
+# In backend/.env:
+JARVIS_TTS_PROVIDER=elevenlabs
+JARVIS_ELEVENLABS_API_KEY=<your key>
+JARVIS_ELEVENLABS_VOICE_ID=<your voice id>
+```
+
+The voice itself has to already exist in your ElevenLabs account (Voices → Add Voice →
+Instant Voice Clone, upload a sample there) — the backend only calls the synthesis
+endpoint for an existing voice ID, it never uploads/trains anything. Implemented in
+`app/services/elevenlabs_speech.py`, returns raw MP3 bytes from
+`POST /v1/text-to-speech/{voice_id}`.
+
+On the iOS side, this also needs **Settings → Voice → "Remote (cloud) text-to-speech"**
+turned on — without that, the app keeps using Apple's on-device voice even if the backend
+is configured for ElevenLabs (`AppEnvironment` picks `CloudTextToSpeechProvider` vs.
+`AppleTextToSpeechProvider` based on that flag, only when Live Mode + a backend URL are
+also set).
 
 ## Adding a different reasoning/vision provider
 

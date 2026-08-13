@@ -12,8 +12,20 @@ def mock_transcribe(audio_base64: str) -> str:
     return "what am I looking at"
 
 
-def mock_synthesize(text: str) -> bytes:
+class MockSpeechProvider:
     """Returns a tiny placeholder WAV payload rather than calling a real TTS
     vendor. The primary voice path is on-device (AVSpeechSynthesizer); this
-    endpoint exists for the optional remote high-quality voice (spec 11)."""
-    return b"RIFF....WAVEfmt " + text.encode("utf-8")[:64]
+    is the default until `JARVIS_TTS_PROVIDER=elevenlabs` is configured with
+    a real cloned voice (spec 11)."""
+
+    def synthesize(self, text: str, voice_id: str) -> bytes:
+        return b"RIFF....WAVEfmt " + text.encode("utf-8")[:64]
+
+
+def get_speech_provider(provider_name: str):
+    if provider_name == "elevenlabs":
+        from app.core.config import get_settings
+        from app.services.elevenlabs_speech import ElevenLabsSpeechProvider
+
+        return ElevenLabsSpeechProvider(get_settings())
+    return MockSpeechProvider()

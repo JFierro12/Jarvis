@@ -32,6 +32,17 @@ public final class AppleTextToSpeechProvider: NSObject, TextToSpeechProvider, @u
         await withCheckedContinuation { continuation in
             self.continuation = continuation
             synthesizer.speak(utterance)
+
+            // Safety net matching CloudTextToSpeechProvider: if the
+            // delegate callback is ever dropped, don't hang the caller
+            // (and everything sequenced after it, e.g. the wake-word
+            // acknowledgement blocking the start of listening) forever.
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 20_000_000_000)
+                guard let self else { return }
+                self.continuation?.resume()
+                self.continuation = nil
+            }
         }
     }
 

@@ -50,6 +50,12 @@
 	<array>
 		<string>bluetooth-peripheral</string>
 		<string>external-accessory</string>
+		<!-- Lets wake-word listening (and the resulting conversation turn)
+		     keep running while backgrounded, if the user opts in via
+		     Settings > Voice > "Listen in background". Only stays alive
+		     while genuine audio I/O is active — not a general-purpose
+		     background execution loophole. -->
+		<string>audio</string>
 	</array>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Needed to connect to your Ray-Ban Meta glasses.</string>
@@ -74,6 +80,8 @@
 	<string>JARVIS can create reminders when you ask it to, if you enable Reminders in Settings.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>JARVIS can attach a coarse location to a saved memory, if you enable Location in Settings.</string>
+	<key>NSAppleMusicUsageDescription</key>
+	<string>JARVIS can shuffle a playlist in your Apple Music library when you ask it to.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

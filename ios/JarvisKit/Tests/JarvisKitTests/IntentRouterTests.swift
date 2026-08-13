@@ -50,4 +50,19 @@ final class IntentRouterTests: XCTestCase {
         XCTAssertEqual(router.route("confirm").intent, .confirm)
         XCTAssertEqual(router.route("no").intent, .reject)
     }
+
+    func testBrowseStartsGestureMode() {
+        XCTAssertEqual(router.route("browse").intent, .startBrowseMode)
+        XCTAssertEqual(router.route("Jarvis, browse").intent, .startBrowseMode)
+    }
+
+    func testStopBrowsingDoesNotCollideWithStartOrCancel() {
+        XCTAssertEqual(router.route("stop browsing").intent, .stopBrowseMode)
+        XCTAssertEqual(router.route("exit browse mode").intent, .stopBrowseMode)
+    }
+
+    func testGeniusPlaylistTrigger() {
+        XCTAssertEqual(router.route("Let's remind everyone who the genius in the room is").intent, .playGeniusPlaylist)
+        XCTAssertEqual(router.route("who's the genius in the room").intent, .playGeniusPlaylist)
+    }
 }

@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     anthropic_model: str = "claude-opus-5"
     log_level: str = "info"
 
+    # "mock" (default, tiny placeholder payload, no network) or "elevenlabs"
+    # for a real cloned-voice TTS backend.
+    tts_provider: str = "mock"
+    elevenlabs_api_key: str = ""
+    # Default voice used when the client doesn't override voice_id.
+    elevenlabs_voice_id: str = ""
+
     @property
     def auth_token_set(self) -> set[str]:
         return {t.strip() for t in self.auth_tokens.split(",") if t.strip()}

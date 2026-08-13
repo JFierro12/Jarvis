@@ -11,7 +11,7 @@ public enum KeychainError: Error, Equatable {
 public final class KeychainStore: @unchecked Sendable {
     private let service: String
 
-    public init(service: String = "com.jarvis.app") {
+    public init(service: String = "com.johnathanfierro.jarvis") {
         self.service = service
     }
 

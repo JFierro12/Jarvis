@@ -5,6 +5,7 @@ import JarvisKit
 struct JarvisApp: App {
     @StateObject private var environment = AppEnvironment.makeFromStoredPreferences()
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         // TODO(hardware-verification): call MetaWearableDeviceClient.configureSDK()
@@ -28,6 +29,9 @@ struct JarvisApp: App {
                 Task {
                     await MetaWearableDeviceClient.handleCallback(url: url)
                 }
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                environment.handleScenePhaseChange(isActive: newPhase == .active)
             }
         }
     }

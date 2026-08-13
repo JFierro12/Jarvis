@@ -1,9 +1,13 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
 from app.api import assistant, health, integrations, memories, session, tools
+from app.core.config import get_settings
 from app.memory.database import init_db
+
+logging.basicConfig(level=get_settings().log_level.upper())
 
 
 @asynccontextmanager
