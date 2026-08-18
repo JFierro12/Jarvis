@@ -117,23 +117,27 @@ class AnthropicLanguageReasoningProvider:
 
     def reason(self, context: List[ContextItem], question: str, available_tools: List[str]) -> ReasonResponse:
         user_content = self._render_user_message(context, question, available_tools)
+        # Only the football-shorthand path (client-tagged with this exact
+        # prefix — see AssistantCoordinator.handle(intent:)) needs the
+        # deeper, slower reasoning pass; every other question through this
+        # endpoint (plain Q&A, tool proposals) is latency-sensitive and
+        # should stay fast. Effort/tokens were previously bumped globally
+        # for the football case, which made ordinary conversation slower
+        # for no benefit — branch instead of picking one setting for both.
+        is_football_shorthand = question.startswith("Coach's shorthand pre-snap read:")
+        effort = "medium" if is_football_shorthand else "low"
+        max_tokens = 2048 if is_football_shorthand else 1024
         try:
             response = self._client.messages.create(
                 model=self._model,
-                # 1024 was sized for the one-or-two-sentence default; bumped
-                # so the verbal football-coverage exception (see system
-                # prompt) has real room for a full breakdown without
-                # truncating — matching the same lesson learned on the
-                # vision endpoint's max_tokens.
-                max_tokens=2048,
-                system=_SYSTEM_PROMPT,
+                max_tokens=max_tokens,
+                # System prompt is large and identical on every call to this
+                # endpoint — caching it avoids reprocessing it from scratch
+                # each turn, cutting latency and cost on repeat requests
+                # within the cache TTL.
+                system=[{"type": "text", "text": _SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
                 thinking={"type": "adaptive"},
-                # "medium", not "low" — the football exception needs more
-                # than bare "low" effort to reason from a verbal
-                # description to a specific coverage shell, but this still
-                # needs to come back before the play clock runs out, so not
-                # "high" either. Same tradeoff as the vision endpoint.
-                output_config={"effort": "medium", "format": {"type": "json_schema", "schema": _REASON_JSON_SCHEMA}},
+                output_config={"effort": effort, "format": {"type": "json_schema", "schema": _REASON_JSON_SCHEMA}},
                 messages=[{"role": "user", "content": user_content}],
             )
         except anthropic.APIError as exc:
