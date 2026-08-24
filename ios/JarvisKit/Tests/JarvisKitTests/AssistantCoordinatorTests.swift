@@ -422,6 +422,29 @@ final class AssistantCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.state, .idle)
     }
 
+    func testWakeWordActivationPlaysLocalCueInsteadOfSpeakingAcknowledgment() async {
+        let tts = MockTextToSpeechProvider()
+        let cuePlayer = MockAcknowledgmentCuePlayer()
+        let coordinator = AssistantCoordinator(
+            wearableClient: MockWearableDeviceClient(demoImageData: Data([0xFF, 0xD8])),
+            speechToText: MockSpeechToTextProvider(scriptedTranscript: "what am I looking at"),
+            textToSpeech: tts,
+            visionProvider: MockVisionReasoningProvider(),
+            languageProvider: MockLanguageReasoningProvider(),
+            memoryRepository: InMemoryMemoryRepository(),
+            toolExecutor: MockToolExecutor(memoryRepository: InMemoryMemoryRepository()),
+            acknowledgmentCuePlayer: cuePlayer
+        )
+
+        // spokenText: nil is the real wake-word path (goes through STT),
+        // which is what speaks/plays the "I'm listening" acknowledgment —
+        // the injected-text path used by most other tests skips it.
+        await coordinator.activate(mode: .foregroundWakeWord, spokenText: nil)
+
+        XCTAssertEqual(cuePlayer.playCount, 1)
+        XCTAssertFalse(tts.spokenUtterances.contains("Yes, sir?"))
+    }
+
     func testGeniusPlaylistSurfacesPlaylistNotFoundError() async {
         let tts = MockTextToSpeechProvider()
         let music = MockMusicPlayerController(scriptedError: .playlistNotFound("Genius, Billionaire, Playboy, Philanthropist"))

@@ -174,7 +174,8 @@ final class AppEnvironment: ObservableObject {
                 memoryRepository: memoryRepository,
                 toolExecutor: MockToolExecutor(memoryRepository: memoryRepository, pcAgentClient: pcAgentClient),
                 handGestureController: handGestureController,
-                musicPlayerController: AppleMusicPlayerController()
+                musicPlayerController: AppleMusicPlayerController(),
+                acknowledgmentCuePlayer: SystemSoundAcknowledgmentCuePlayer()
             )
         }
 
