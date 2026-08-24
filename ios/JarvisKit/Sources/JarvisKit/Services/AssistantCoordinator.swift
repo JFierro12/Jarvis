@@ -33,6 +33,7 @@ public final class AssistantCoordinator: ObservableObject {
     private let voiceSettings: VoiceSettings
     private let handGestureController: HandGestureController
     private let musicPlayerController: MusicPlayerController
+    private let acknowledgmentCuePlayer: AcknowledgmentCuePlayer
 
     /// True while waiting for the user's yes/no answer to "would you like
     /// directions on how to do so sir?" after starting browse mode.
@@ -65,7 +66,8 @@ public final class AssistantCoordinator: ObservableObject {
         grantedPermissions: Set<String> = [],
         voiceSettings: VoiceSettings = .default,
         handGestureController: HandGestureController = MockHandGestureController(),
-        musicPlayerController: MusicPlayerController = MockMusicPlayerController()
+        musicPlayerController: MusicPlayerController = MockMusicPlayerController(),
+        acknowledgmentCuePlayer: AcknowledgmentCuePlayer = MockAcknowledgmentCuePlayer()
     ) {
         self.wearableClient = wearableClient
         self.speechToText = speechToText
@@ -82,6 +84,7 @@ public final class AssistantCoordinator: ObservableObject {
         self.voiceSettings = voiceSettings
         self.handGestureController = handGestureController
         self.musicPlayerController = musicPlayerController
+        self.acknowledgmentCuePlayer = acknowledgmentCuePlayer
         self.stateMachine = AssistantStateMachine()
         observeWearableConnection()
         observeGestureControlState()
@@ -258,13 +261,14 @@ public final class AssistantCoordinator: ObservableObject {
             if mode == .foregroundWakeWord && !isConversationContinuation {
                 // Wake word has no physical tap to confirm activation, and
                 // the user is typically wearing the glasses rather than
-                // looking at the phone — a spoken cue is the only reliable
-                // "I'm listening now" signal, and doubles as the moment to
-                // say a cancel phrase if it triggered by accident. Skipped
-                // on continuation turns — repeating it every follow-up in a
-                // conversation would feel unnatural.
-                NSLog("[JarvisCoordinator] wake word activated, about to speak acknowledgement cue")
-                await textToSpeech.speak("Yes, sir?", settings: voiceSettings)
+                // looking at the phone — an acknowledgment cue is the only
+                // reliable "I'm listening now" signal. A local sound cue
+                // (not spoken TTS) so there's no network round trip before
+                // listening even starts. Skipped on continuation turns —
+                // repeating it every follow-up in a conversation would feel
+                // unnatural.
+                NSLog("[JarvisCoordinator] wake word activated, about to play acknowledgement cue")
+                await acknowledgmentCuePlayer.play()
                 NSLog("[JarvisCoordinator] acknowledgement cue done, starting collectTranscript()")
             }
             transcript = await collectTranscript()

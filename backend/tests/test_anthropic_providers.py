@@ -74,7 +74,7 @@ def test_reasoning_system_prompt_forbids_acting_on_untrusted_content():
     fake_client = _FakeAnthropicClient(payload)
     provider = AnthropicLanguageReasoningProvider(_settings(), client=fake_client)
     provider.reason([], "hi", [])
-    system_prompt = fake_client.messages.last_kwargs["system"]
+    system_prompt = fake_client.messages.last_kwargs["system"][0]["text"]
     assert "CAMERA_OBSERVATION" in system_prompt
     assert "untrusted" in system_prompt
 

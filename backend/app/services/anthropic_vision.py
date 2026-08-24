@@ -123,7 +123,11 @@ class AnthropicVisionReasoningProvider:
                 # (pre-snap read + shell ID + rationale + QB progression)
                 # so an OC-level answer never truncates mid-thought.
                 max_tokens=4096,
-                system=_SYSTEM_PROMPT,
+                # System prompt is large and identical on every call to this
+                # endpoint — caching it avoids reprocessing it from scratch
+                # each turn, cutting latency and cost on repeat requests
+                # within the cache TTL.
+                system=[{"type": "text", "text": _SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
                 thinking={"type": "adaptive"},
                 # "medium", not "high" — the football breakdown is genuine
                 # multi-step tactical inference and benefits from more than
