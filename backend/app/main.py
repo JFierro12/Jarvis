@@ -1,9 +1,11 @@
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
-from app.api import assistant, health, integrations, memories, session, tools
+from app.api import assistant, dashboard, health, integrations, memories, session, system, tools
 from app.core.config import get_settings
 from app.memory.database import init_db
 
@@ -24,3 +26,12 @@ app.include_router(assistant.router)
 app.include_router(memories.router)
 app.include_router(tools.router)
 app.include_router(integrations.router)
+app.include_router(system.router)
+# Dashboard last: it claims "/", and must never shadow any API route
+# registered above it.
+app.include_router(dashboard.router)
+app.mount(
+    "/assets",
+    StaticFiles(directory=str(Path(__file__).parent / "static" / "assets")),
+    name="dashboard-assets",
+)

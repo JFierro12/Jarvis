@@ -8,6 +8,26 @@ class HealthResponse(BaseModel):
     version: str
 
 
+class GpuStats(BaseModel):
+    name: str
+    load_percent: float
+    memory_used_mb: float
+    memory_total_mb: float
+    temperature_c: Optional[float] = None
+
+
+class SystemStatsResponse(BaseModel):
+    cpu_percent: float
+    ram_percent: float
+    ram_used_gb: float
+    ram_total_gb: float
+    disk_percent: float
+    disk_used_gb: float
+    disk_total_gb: float
+    uptime_seconds: float
+    gpu: Optional[GpuStats] = None
+
+
 class SessionRequest(BaseModel):
     device_id: str
     client_version: str

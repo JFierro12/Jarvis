@@ -69,6 +69,11 @@ open ios/Jarvis/Jarvis.xcodeproj
 ./scripts/test.sh
 ```
 
+There's also a Windows desktop build (`desktop/`): the same backend, plus a
+local web dashboard UI and a real local LLM (via Ollama) as the reasoning
+provider instead of a cloud API call, packaged as an always-on `.exe`. See
+`desktop/README.md`.
+
 See `docs/SETUP_IOS.md` and `docs/SETUP_BACKEND.md` for full setup, troubleshooting, and
 how to move from demo mode toward real hardware/cloud providers.
 
@@ -110,4 +115,5 @@ word — never a claim of glasses-level "Jarvis" support.
 - `docs/ROADMAP.md` — phase-by-phase implementation status.
 - `docs/LIMITATIONS.md` — firmware vs. app, foreground vs. background, standard vs.
   display glasses.
+- `desktop/README.md` — Windows desktop app: local-LLM setup and `.exe` packaging.
 - `AGENTS.md` — guidance for AI coding agents working in this repo.

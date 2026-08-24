@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="jarvis-token" content="{{TOKEN}}" />
+  <title>J.A.R.V.I.S.</title>
+  <link rel="stylesheet" href="/assets/style.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="rail">
+      <div class="card" id="card-stats">
+        <div class="card-head">
+          <span class="card-title">System Stats</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">CPU</span>
+          <span class="stat-value" id="cpu-value">--%</span>
+        </div>
+        <div class="meter"><div class="meter-fill" id="cpu-meter"></div></div>
+        <div class="stat-row">
+          <span class="stat-label">RAM</span>
+          <span class="stat-value" id="ram-value">-- / -- GB</span>
+        </div>
+        <div class="meter"><div class="meter-fill" id="ram-meter"></div></div>
+        <div class="stat-grid">
+          <div>
+            <div class="stat-mini-label">Disk</div>
+            <div class="stat-mini-value" id="disk-value">--</div>
+          </div>
+          <div>
+            <div class="stat-mini-label">GPU</div>
+            <div class="stat-mini-value" id="gpu-value">--</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" id="card-weather">
+        <div class="card-head">
+          <span class="card-title">Weather</span>
+        </div>
+        <div class="weather-main">
+          <span class="weather-temp" id="weather-temp">--&deg;C</span>
+          <span class="weather-place" id="weather-place">Locating&hellip;</span>
+        </div>
+        <div class="weather-sub" id="weather-desc">&mdash;</div>
+        <div class="stat-grid">
+          <div>
+            <div class="stat-mini-label">Humidity</div>
+            <div class="stat-mini-value" id="weather-humidity">--%</div>
+          </div>
+          <div>
+            <div class="stat-mini-label">Wind</div>
+            <div class="stat-mini-value" id="weather-wind">-- m/s</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" id="card-camera">
+        <div class="card-head">
+          <span class="card-title">Camera</span>
+        </div>
+        <div class="camera-off">
+          <div class="camera-off-icon">&#9679;</div>
+          <div class="camera-off-label">Camera Off</div>
+          <div class="camera-off-note">Not wired up yet.</div>
+        </div>
+      </div>
+
+      <div class="card" id="card-uptime">
+        <div class="card-head">
+          <span class="card-title">System Uptime</span>
+        </div>
+        <div class="uptime-value" id="uptime-value">--:--:--</div>
+      </div>
+    </aside>
+
+    <main class="stage">
+      <div class="orb-wrap">
+        <div class="orb" id="orb"></div>
+        <div class="wordmark">J.A.R.V.I.S.</div>
+        <div class="status-line" id="status-line">Online &mdash; local reasoning</div>
+      </div>
+
+      <div class="chat" id="chat"></div>
+
+      <form class="composer" id="composer">
+        <input type="text" id="composer-input" placeholder="Type a message&hellip;" autocomplete="off" />
+        <button type="submit" id="composer-send">Send</button>
+      </form>
+    </main>
+  </div>
+
+  <script src="/assets/app.js"></script>
+</body>
+</html>
