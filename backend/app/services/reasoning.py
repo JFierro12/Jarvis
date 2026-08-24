@@ -70,4 +70,9 @@ def get_reasoning_provider(provider_name: str) -> LanguageReasoningProvider:
         from app.services.anthropic_reasoning import AnthropicLanguageReasoningProvider
 
         return AnthropicLanguageReasoningProvider(get_settings())
+    if provider_name == "local":
+        from app.core.config import get_settings
+        from app.services.local_reasoning import LocalLanguageReasoningProvider
+
+        return LocalLanguageReasoningProvider(get_settings())
     return MockLanguageReasoningProvider()

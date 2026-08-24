@@ -24,6 +24,15 @@ class Settings(BaseSettings):
     # Default voice used when the client doesn't override voice_id.
     elevenlabs_voice_id: str = ""
 
+    # Only read when reasoning_provider == "local". Points at a locally
+    # running Ollama server (see desktop/README.md for Windows setup). The
+    # model tag drifts over time — confirm the exact current one with
+    # `ollama list` at setup rather than trusting this default blindly.
+    local_llm_base_url: str = "http://localhost:11434"
+    local_llm_model: str = "qwen2.5:14b-instruct-q4_K_M"
+    # Generous — local inference on a consumer GPU is slower than a cloud API.
+    local_llm_timeout_seconds: float = 60.0
+
     @property
     def auth_token_set(self) -> set[str]:
         return {t.strip() for t in self.auth_tokens.split(",") if t.strip()}

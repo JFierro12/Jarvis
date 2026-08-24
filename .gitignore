@@ -18,6 +18,11 @@ pc-agent/.env
 .pytest_cache/
 .ruff_cache/
 
+# Windows desktop packaging (build output, not source)
+desktop/venv/
+desktop/build/
+desktop/dist/
+
 # Misc
 .DS_Store
 *.log

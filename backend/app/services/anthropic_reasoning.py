@@ -12,7 +12,11 @@ from app.services.reasoning import UNTRUSTED_SOURCES
 # compromised or hallucinating model has no channel to parameterize a tool
 # call beyond what PolicyEngine/evaluate_tool_call already gates on
 # (tool_name, target) — see docs/THREAT_MODEL.md.
-_REASON_JSON_SCHEMA: Dict[str, Any] = {
+#
+# Shared (not underscore-prefixed) because LocalLanguageReasoningProvider
+# (app/services/local_reasoning.py) imports this and SYSTEM_PROMPT below
+# verbatim — both providers must uphold the same prompt-injection contract.
+REASON_JSON_SCHEMA: Dict[str, Any] = {
     "type": "object",
     "properties": {
         "spoken_answer": {"type": "string"},
@@ -37,7 +41,7 @@ _REASON_JSON_SCHEMA: Dict[str, Any] = {
     "additionalProperties": False,
 }
 
-_SYSTEM_PROMPT = """You are JARVIS, a calm, concise, restrained voice assistant for smart glasses.
+SYSTEM_PROMPT = """You are JARVIS, a calm, concise, restrained voice assistant for smart glasses.
 
 Always address the user as "sir" — naturally, the way a butler would, not in
 every single sentence. Never use it more than once per response.
@@ -130,6 +134,20 @@ class AnthropicLanguageReasoningProvider:
         try:
             response = self._client.messages.create(
                 model=self._model,
+                # 1024 was sized for the one-or-two-sentence default; bumped
+                # so the verbal football-coverage exception (see system
+                # prompt) has real room for a full breakdown without
+                # truncating — matching the same lesson learned on the
+                # vision endpoint's max_tokens.
+                max_tokens=2048,
+                system=SYSTEM_PROMPT,
+                thinking={"type": "adaptive"},
+                # "medium", not "low" — the football exception needs more
+                # than bare "low" effort to reason from a verbal
+                # description to a specific coverage shell, but this still
+                # needs to come back before the play clock runs out, so not
+                # "high" either. Same tradeoff as the vision endpoint.
+                output_config={"effort": "medium", "format": {"type": "json_schema", "schema": REASON_JSON_SCHEMA}},
                 max_tokens=max_tokens,
                 # System prompt is large and identical on every call to this
                 # endpoint — caching it avoids reprocessing it from scratch
@@ -172,4 +190,10 @@ class AnthropicLanguageReasoningProvider:
 
 
 # Re-exported so callers only need one import for the injection-defense set.
-__all__ = ["AnthropicLanguageReasoningProvider", "LanguageReasoningUnavailableError", "UNTRUSTED_SOURCES"]
+__all__ = [
+    "AnthropicLanguageReasoningProvider",
+    "LanguageReasoningUnavailableError",
+    "UNTRUSTED_SOURCES",
+    "REASON_JSON_SCHEMA",
+    "SYSTEM_PROMPT",
+]
