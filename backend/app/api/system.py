@@ -1,3 +1,5 @@
+import os
+import threading
 import time
 from typing import Optional
 
@@ -6,6 +8,7 @@ from fastapi import APIRouter, Depends
 
 from app.core.security import require_bearer_token
 from app.models.schemas import GpuStats, SystemStatsResponse
+from app.services.browser_automation import get_browser_automation_service
 
 router = APIRouter()
 
@@ -60,3 +63,25 @@ def system_stats(_token: str = Depends(require_bearer_token)) -> SystemStatsResp
         uptime_seconds=time.time() - _BOOT_TIME,
         gpu=_collect_gpu_stats(),
     )
+
+
+@router.post("/v1/system/terminate")
+async def terminate(_token: str = Depends(require_bearer_token)) -> dict:
+    """Closes every JARVIS-controlled browser tab and quits the whole app
+    process. Deliberately NOT a tool the reasoning model can propose — "Jarvis
+    terminate" is matched client-side as a fixed phrase (like the stop-word
+    list) and calls this directly, the same way clicking the tray icon's
+    Quit already does, rather than trusting a small local LLM's judgment on
+    whether to end the entire process.
+    """
+    await get_browser_automation_service().close_all()
+
+    def _exit_after_response() -> None:
+        # Give the HTTP response (and the client's farewell TTS/UI update) a
+        # moment to actually reach the browser before the process disappears
+        # out from under the connection.
+        time.sleep(1.0)
+        os._exit(0)
+
+    threading.Thread(target=_exit_after_response, daemon=True).start()
+    return {"status": "terminating"}

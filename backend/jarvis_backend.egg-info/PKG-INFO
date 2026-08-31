@@ -11,6 +11,8 @@ Requires-Dist: sqlalchemy>=2.0
 Requires-Dist: python-multipart>=0.0.9
 Requires-Dist: anthropic>=0.120
 Requires-Dist: httpx>=0.27
+Requires-Dist: psutil>=6.0
+Requires-Dist: nvidia-ml-py>=12.560; sys_platform == "win32"
 Provides-Extra: dev
 Requires-Dist: pytest>=8.0; extra == "dev"
 Requires-Dist: httpx>=0.27; extra == "dev"

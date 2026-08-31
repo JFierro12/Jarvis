@@ -5,9 +5,48 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="jarvis-token" content="{{TOKEN}}" />
   <title>J.A.R.V.I.S.</title>
+  <link rel="icon" href="/assets/icon.png" />
   <link rel="stylesheet" href="/assets/style.css" />
 </head>
 <body>
+  <svg class="circuit-bg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+    <g class="trace" fill="none" stroke-linecap="round">
+      <polyline points="60,120 210,120 260,70 420,70 420,30 520,30" />
+      <circle cx="60" cy="120" r="4" fill="currentColor" stroke="none" />
+      <circle cx="520" cy="30" r="3" fill="currentColor" stroke="none" />
+
+      <polyline points="40,300 190,300 190,260 300,260 340,220 340,180" />
+      <rect x="30" y="290" width="20" height="20" transform="rotate(45 40 300)" />
+
+      <polyline points="30,470 170,470 210,510 210,560 280,560" />
+      <circle cx="30" cy="470" r="4" fill="currentColor" stroke="none" />
+
+      <polyline points="60,660 200,660 240,700 350,700 390,740 460,740" />
+      <polyline points="90,780 260,780 300,820 480,820" />
+
+      <polyline points="1540,110 1400,110 1360,150 1230,150 1190,190 1190,240" />
+      <circle cx="1540" cy="110" r="4" fill="currentColor" stroke="none" />
+
+      <polyline points="1560,300 1420,300 1420,340 1320,340 1280,380" />
+      <rect x="1330" y="255" width="70" height="22" />
+
+      <polyline points="1520,470 1380,470 1340,510 1340,560 1270,560" />
+      <circle cx="1520" cy="470" r="3" fill="currentColor" stroke="none" />
+
+      <polyline points="1550,640 1400,640 1360,680 1250,680 1210,720 1140,720" />
+      <polyline points="1500,800 1330,800 1290,760 1160,760" />
+
+      <polyline points="800,60 800,110" />
+      <polyline points="800,780 800,840" />
+    </g>
+    <g class="trace-node" fill="none" stroke-linecap="round">
+      <line x1="34" y1="464" x2="46" y2="476" />
+      <line x1="46" y1="464" x2="34" y2="476" />
+      <line x1="1544" y1="104" x2="1556" y2="116" />
+      <line x1="1556" y1="104" x2="1544" y2="116" />
+    </g>
+  </svg>
+
   <div class="app">
     <aside class="rail">
       <div class="card" id="card-stats">
@@ -41,7 +80,7 @@
           <span class="card-title">Weather</span>
         </div>
         <div class="weather-main">
-          <span class="weather-temp" id="weather-temp">--&deg;C</span>
+          <span class="weather-temp" id="weather-temp">--&deg;F</span>
           <span class="weather-place" id="weather-place">Locating&hellip;</span>
         </div>
         <div class="weather-sub" id="weather-desc">&mdash;</div>
@@ -68,24 +107,52 @@
         </div>
       </div>
 
-      <div class="card" id="card-uptime">
+      <div class="card" id="card-clock">
         <div class="card-head">
-          <span class="card-title">System Uptime</span>
+          <span class="card-title">Local Time</span>
         </div>
-        <div class="uptime-value" id="uptime-value">--:--:--</div>
+        <div class="clock-value" id="clock-time">--:--:--</div>
+        <div class="clock-date" id="clock-date">&mdash;</div>
       </div>
     </aside>
 
     <main class="stage">
       <div class="orb-wrap">
-        <div class="orb" id="orb"></div>
+        <div class="orb" id="orb">
+          <div class="ring ring-outer"></div>
+          <div class="ring ring-ticks-outer"></div>
+          <div class="ring ring-bright"></div>
+          <div class="ring ring-ticks-inner"></div>
+          <div class="corner-arc corner-arc-a"></div>
+          <div class="corner-arc corner-arc-b"></div>
+          <div class="core"></div>
+        </div>
         <div class="wordmark">J.A.R.V.I.S.</div>
-        <div class="status-line" id="status-line">Online &mdash; local reasoning</div>
+        <div class="status-line" id="status-line">Online</div>
+        <button type="button" id="wake-toggle" class="wake-toggle" aria-pressed="false">
+          <span class="wake-dot"></span> Wake Word
+        </button>
       </div>
 
+      <div class="chat-head">
+        <button type="button" id="chat-toggle" class="chat-toggle" aria-expanded="false" aria-label="Toggle conversation view">
+          <span class="chat-toggle-bar"></span>
+          <span class="chat-toggle-bar"></span>
+          <span class="chat-toggle-bar"></span>
+        </button>
+        <button type="button" id="clear-history" class="clear-history">Clear conversation</button>
+      </div>
       <div class="chat" id="chat"></div>
 
       <form class="composer" id="composer">
+        <button type="button" id="mic-btn" class="mic-btn" title="Speak" aria-label="Speak">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z" fill="currentColor" />
+            <path d="M19 11a7 7 0 0 1-14 0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+            <line x1="12" y1="18" x2="12" y2="22" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+            <line x1="8" y1="22" x2="16" y2="22" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+          </svg>
+        </button>
         <input type="text" id="composer-input" placeholder="Type a message&hellip;" autocomplete="off" />
         <button type="submit" id="composer-send">Send</button>
       </form>

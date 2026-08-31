@@ -150,6 +150,7 @@ class ToolExecuteRequest(BaseModel):
     arguments: Dict[str, str] = Field(default_factory=dict)
     target: str = ""
     confirmed: bool = False
+    granted_permissions: List[str] = Field(default_factory=list)
 
 
 class ToolExecuteResponse(BaseModel):

@@ -43,5 +43,7 @@ TOOL_DEFINITIONS: Dict[str, ToolDefinition] = {
         ToolDefinition("lock_pc", "Locks the paired PC.", "external_side_effect", ["pc_agent"]),
         ToolDefinition("shutdown_pc", "Shuts down the paired PC.", "sensitive_write", ["pc_agent"]),
         ToolDefinition("open_navigation", "Opens navigation to a destination.", "external_side_effect"),
+        ToolDefinition("open_website", "Opens a website or web app in a new browser tab.", "external_side_effect"),
+        ToolDefinition("close_website", "Closes a previously opened website/app tab.", "reversible_write"),
     ]
 }

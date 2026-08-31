@@ -6,6 +6,7 @@ import os
 
 BACKEND_DIR = os.path.join(SPECPATH, "..", "backend")
 STATIC_DIR = os.path.join(BACKEND_DIR, "app", "static")
+ICON_PATH = os.path.join(SPECPATH, "assets", "icon.ico")
 
 block_cipher = None
 
@@ -13,7 +14,7 @@ a = Analysis(
     [os.path.join(BACKEND_DIR, "app", "desktop_main.py")],
     pathex=[BACKEND_DIR],
     binaries=[],
-    datas=[(STATIC_DIR, "app/static")],
+    datas=[(STATIC_DIR, "app/static"), (os.path.join(SPECPATH, "assets", "icon.png"), "assets")],
     hiddenimports=[
         # uvicorn dynamically imports its protocol backends; PyInstaller's
         # static analysis doesn't see them, so they must be listed here or
@@ -41,6 +42,7 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,
+    icon=ICON_PATH,
 )
 
 # --onedir, not --onefile: a --onefile build re-extracts itself into a temp
