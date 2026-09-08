@@ -250,13 +250,26 @@
   // submitPendingSearch), skipping the model entirely for that step so a
   // "what would you like to search for?" follow-up is fast and reliable.
   let pendingSearchSite = null;
+  let pendingSearchSiteTimer = null;
+
+  // Same window as the conversation follow-up (see FOLLOW_UP_WINDOW_MS) —
+  // without an expiry, this stayed armed indefinitely, so a later
+  // completely unrelated "Jarvis, ..." got silently swallowed as literal
+  // search text for whatever site was opened much earlier.
+  const PENDING_SEARCH_TIMEOUT_MS = 15000;
 
   function armPendingSearchSite(siteKey) {
     pendingSearchSite = siteKey;
+    clearTimeout(pendingSearchSiteTimer);
+    pendingSearchSiteTimer = setTimeout(() => {
+      console.info("[JARVIS] pendingSearchSite expired unused:", siteKey);
+      pendingSearchSite = null;
+    }, PENDING_SEARCH_TIMEOUT_MS);
   }
 
   function clearPendingSearchSite() {
     pendingSearchSite = null;
+    clearTimeout(pendingSearchSiteTimer);
   }
 
   function setThinking(isThinking) {
@@ -790,9 +803,18 @@
           }
 
           if (pendingSearchSite) {
-            console.info("[JARVIS] using heard text as search query for", pendingSearchSite, ":", transcript);
-            submitPendingSearch(transcript);
-            return;
+            if (WAKE_RE.test(transcript)) {
+              // Saying "Jarvis" again means a fresh command, not an answer
+              // to "what would you like to search for?" — drop the stale
+              // pending search and fall through to the normal wake-word
+              // handling below instead of eating this as literal search text.
+              console.info("[JARVIS] fresh wake word heard — dropping stale pendingSearchSite:", pendingSearchSite);
+              clearPendingSearchSite();
+            } else {
+              console.info("[JARVIS] using heard text as search query for", pendingSearchSite, ":", transcript);
+              submitPendingSearch(transcript);
+              return;
+            }
           }
 
           if (awaitingCommand) {
