@@ -15,6 +15,10 @@ dependencies = [
     "psutil>=6.0",
     "nvidia-ml-py>=12.560; sys_platform == \"win32\"",
     "playwright>=1.45",
+    "pillow>=10.0",
+    "pywinauto>=0.6.8; sys_platform == \"win32\"",
+    "send2trash>=1.8",
+    "faster-whisper>=1.0",
 ]
 
 [project.optional-dependencies]
