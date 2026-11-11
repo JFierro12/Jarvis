@@ -77,6 +77,83 @@ produce a `.exe`.
    quit the whole app (and close any open automated browser tabs) from
    voice.
 
+## Speech recognition (local)
+
+With `JARVIS_STT_PROVIDER=local`, speech-to-text runs on this machine via
+faster-whisper — no cloud service, works offline. The dashboard captures
+mic audio itself (energy-based voice-activity detection, with a short
+pre-roll so the first syllable of "Jarvis" isn't clipped), encodes the
+speech portion to WAV, and posts it to `/v1/transcribe`.
+
+This replaced the browser's Web Speech API, which sent every utterance to
+Google's cloud (the source of the recurring `network` recognition errors)
+and depended on the embedded browser engine granting a cloud speech API a
+microphone.
+
+Measured on this machine (RTX 4070 Laptop, `base.en`, CPU, n=3):
+
+| | Latency |
+|---|---|
+| Cold (first call, includes model load) | ~9.6s packaged / ~6s dev |
+| Warm | ~0.96s |
+
+`JARVIS_WHISPER_DEVICE` defaults to **cpu on purpose**, not as a fallback:
+Ollama already needs ~5GB of this card's 8GB, and since an LLM reply takes
+seconds, the ~0.7s a GPU would save on transcription isn't worth making the
+LLM spill layers to CPU. `cuda` additionally requires CUDA/cuBLAS libraries
+present for CTranslate2 (absent by default on Windows — it fails with
+`cublas64_12.dll is not found`).
+
+The model (~150MB for `base.en`) downloads on first use and is then read
+from the local cache without contacting Hugging Face again.
+
+## Desktop control
+
+`launch_app`, `focus_app`, `close_app`, `list_open_windows`, and
+`take_screenshot` control the desktop itself (via pywinauto's win32
+backend), separate from the browser-only automation below. Known limits:
+
+- Windows are matched by **title substring**, so overlapping titles can
+  target the wrong window.
+- `close_app` sends the same close signal as clicking the X. If the app
+  raises its own "Save changes?" dialog, JARVIS can't see or answer it —
+  nothing is force-killed, but it also can't confirm the window closed.
+- `take_screenshot` captures reliably, but the *description* comes from
+  whatever `JARVIS_VISION_PROVIDER` is set to. With the default `mock`
+  it returns a canned string, not a real reading of your screen; that
+  needs `anthropic` (plus an API key) or a local vision model.
+
+## File operations
+
+`list_files`, `read_file`, `write_file`, `append_file`, `create_folder`,
+`move_file`, and `delete_file` operate **only** inside the folders listed in
+`JARVIS_ALLOWED_FOLDERS` (comma-separated). That setting is empty by
+default, which means every file tool refuses until you grant a root
+deliberately — there is no implicit fallback to the whole drive or to
+whatever directory the process happened to start in.
+
+How the boundary is enforced (`app/services/file_operations.py`):
+
+- Every path is `.resolve()`d before the check, which collapses `..` **and**
+  follows symlinks, so both "escape by traversal" and "escape by symlink
+  pointing outside" are compared as their real destination and refused.
+  Covered by tests in `backend/tests/test_file_operations.py`.
+- `move_file` permission-checks source *and* destination independently, so
+  moving data *out* of a permitted folder is refused too.
+- A bare name (`notes.txt`) resolves inside the first permitted folder, not
+  the process's working directory.
+
+Safety behaviours worth knowing:
+
+- `write_file` **refuses to overwrite** an existing file — a misheard
+  filename shouldn't be able to silently destroy something. Use
+  `append_file` to add to a file that already exists.
+- `move_file` renames on collision (`report.txt` → `report (2).txt`)
+  instead of clobbering the file already there.
+- `delete_file` sends to the **Recycle Bin**, not a permanent unlink, and
+  is tiered `destructive` so it always requires confirmation.
+- Reads are truncated at 4000 characters.
+
 ## Browser automation
 
 Say "Jarvis, open YouTube" (or Google, Netflix, Peacock, Hulu, Disney+,

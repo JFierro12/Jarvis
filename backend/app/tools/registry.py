@@ -45,5 +45,30 @@ TOOL_DEFINITIONS: Dict[str, ToolDefinition] = {
         ToolDefinition("open_navigation", "Opens navigation to a destination.", "external_side_effect"),
         ToolDefinition("open_website", "Opens a website or web app in a new browser tab.", "external_side_effect"),
         ToolDefinition("close_website", "Closes a previously opened website/app tab.", "reversible_write"),
+        ToolDefinition("launch_app", "Launches a desktop application by name.", "reversible_write", ["os_control"]),
+        ToolDefinition("focus_app", "Brings an open application window to the foreground.", "read_only", ["os_control"]),
+        ToolDefinition("list_open_windows", "Lists titles of currently open application windows.", "read_only", ["os_control"]),
+        ToolDefinition(
+            "close_app",
+            "Closes an open application window — may trigger the app's own unsaved-work prompt.",
+            "external_side_effect",
+            ["os_control"],
+            requires_confirmation=True,
+        ),
+        ToolDefinition(
+            "take_screenshot", "Captures the screen and describes what's visible.", "read_only", ["screen_capture"]
+        ),
+        ToolDefinition("list_files", "Lists files in a permitted folder.", "read_only", ["file_access"]),
+        ToolDefinition("read_file", "Reads a text file from a permitted folder.", "read_only", ["file_access"]),
+        ToolDefinition("write_file", "Creates a new text file in a permitted folder.", "reversible_write", ["file_access"]),
+        ToolDefinition("append_file", "Appends text to a file in a permitted folder.", "reversible_write", ["file_access"]),
+        ToolDefinition("create_folder", "Creates a folder inside a permitted folder.", "reversible_write", ["file_access"]),
+        ToolDefinition("move_file", "Moves or renames a file within permitted folders.", "reversible_write", ["file_access"]),
+        ToolDefinition(
+            "delete_file",
+            "Sends a file to the Recycle Bin (recoverable).",
+            "destructive",
+            ["file_access"],
+        ),
     ]
 }

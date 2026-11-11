@@ -4,9 +4,17 @@
 # macOS/Linux binary, not a .exe.)
 import os
 
+from PyInstaller.utils.hooks import collect_data_files
+
 BACKEND_DIR = os.path.join(SPECPATH, "..", "backend")
 STATIC_DIR = os.path.join(BACKEND_DIR, "app", "static")
 ICON_PATH = os.path.join(SPECPATH, "assets", "icon.ico")
+
+# faster-whisper ships a Silero VAD model (assets/silero_vad*.onnx) as
+# package *data*, which PyInstaller's module-level analysis doesn't pick
+# up — without this the packaged app imports fine and then fails at the
+# first transcription with "NO_SUCHFILE ... silero_vad_v6.onnx".
+FASTER_WHISPER_DATA = collect_data_files("faster_whisper")
 
 block_cipher = None
 
@@ -14,7 +22,11 @@ a = Analysis(
     [os.path.join(BACKEND_DIR, "app", "desktop_main.py")],
     pathex=[BACKEND_DIR],
     binaries=[],
-    datas=[(STATIC_DIR, "app/static"), (os.path.join(SPECPATH, "assets", "icon.png"), "assets")],
+    datas=[
+        (STATIC_DIR, "app/static"),
+        (os.path.join(SPECPATH, "assets", "icon.png"), "assets"),
+        *FASTER_WHISPER_DATA,
+    ],
     hiddenimports=[
         # uvicorn dynamically imports its protocol backends; PyInstaller's
         # static analysis doesn't see them, so they must be listed here or
