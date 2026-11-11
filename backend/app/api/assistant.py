@@ -17,6 +17,7 @@ from app.models.schemas import (
 )
 from app.services.anthropic_reasoning import LanguageReasoningUnavailableError
 from app.services.elevenlabs_speech import SpeechSynthesisUnavailableError
+from app.services.local_speech import LocalTranscriptionError, get_local_transcriber
 from app.services.reasoning import get_reasoning_provider
 from app.services.speech import get_speech_provider, mock_transcribe
 from app.services.vision import VisionUnavailableError, get_vision_provider
@@ -26,11 +27,35 @@ router = APIRouter()
 
 
 @router.post("/v1/transcribe", response_model=TranscribeResponse)
-def transcribe(payload: TranscribeRequest, _token: str = Depends(require_bearer_token)) -> TranscribeResponse:
-    text = mock_transcribe(payload.audio_base64)
-    if not text:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid audio payload")
-    return TranscribeResponse(text=text, confidence=0.9)
+async def transcribe(
+    payload: TranscribeRequest,
+    _token: str = Depends(require_bearer_token),
+    settings: Settings = Depends(get_settings),
+) -> TranscribeResponse:
+    if settings.stt_provider != "local":
+        text = mock_transcribe(payload.audio_base64)
+        if not text:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid audio payload")
+        return TranscribeResponse(text=text, confidence=0.9)
+
+    try:
+        audio_bytes = base64.b64decode(payload.audio_base64, validate=True)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid audio payload") from exc
+    if not audio_bytes:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty audio payload")
+
+    transcriber = get_local_transcriber(settings.whisper_model, settings.whisper_device, settings.whisper_compute_type)
+    try:
+        text = await transcriber.transcribe(audio_bytes)
+    except LocalTranscriptionError as exc:
+        logger.info("transcribe() -> unavailable: %s", exc)
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    # Silence (or audio the VAD filtered away entirely) is a normal outcome
+    # for the wake-word path, not an error — an empty string lets the caller
+    # simply move on to the next chunk.
+    return TranscribeResponse(text=text, confidence=1.0 if text else 0.0)
 
 
 @router.post("/v1/reason", response_model=ReasonResponse)

@@ -3,3 +3,6 @@ pystray>=0.19
 pillow>=10.0
 pyinstaller>=6.0
 playwright>=1.45
+pywinauto>=0.6.8
+faster-whisper>=1.0
+send2trash>=1.8

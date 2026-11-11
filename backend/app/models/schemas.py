@@ -64,6 +64,10 @@ class ProposedToolCall(BaseModel):
     tool_name: str
     arguments: Dict[str, str] = Field(default_factory=dict)
     target: str = ""
+    # Body text for write_file/append_file only — see REASON_JSON_SCHEMA in
+    # app/services/anthropic_reasoning.py for why this is separate from the
+    # schema-locked `arguments`.
+    content: str = ""
 
 
 class ReasonResponse(BaseModel):
@@ -149,6 +153,7 @@ class ToolExecuteRequest(BaseModel):
     tool_name: str
     arguments: Dict[str, str] = Field(default_factory=dict)
     target: str = ""
+    content: str = ""
     confirmed: bool = False
     granted_permissions: List[str] = Field(default_factory=list)
 

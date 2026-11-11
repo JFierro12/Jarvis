@@ -24,6 +24,25 @@ class Settings(BaseSettings):
     # Default voice used when the client doesn't override voice_id.
     elevenlabs_voice_id: str = ""
 
+    # "mock" (default, canned string) or "local" for real on-device
+    # speech-to-text via faster-whisper — no cloud, works offline.
+    stt_provider: str = "mock"
+    # base.en transcribed clean test speech exactly; small.en is the next
+    # step up in accuracy if real-world mic audio proves noisier.
+    whisper_model: str = "base.en"
+    # CPU on purpose, not as a fallback: Ollama already needs ~5GB of this
+    # machine's 8GB VRAM, and since an LLM reply takes seconds, the ~0.7s
+    # GPU would save on transcription isn't worth making the LLM spill
+    # layers to CPU. Set "cuda" only on a card with headroom to spare —
+    # CTranslate2 also needs CUDA/cuBLAS libraries present for that.
+    whisper_device: str = "cpu"
+    whisper_compute_type: str = "int8"
+
+    # Comma-separated folders JARVIS may read/write. Empty by default:
+    # file tools refuse everything until a root is explicitly granted,
+    # rather than defaulting to the whole drive or the process's cwd.
+    allowed_folders: str = ""
+
     # Only read when reasoning_provider == "local". Points at a locally
     # running Ollama server (see desktop/README.md for Windows setup). The
     # model tag drifts over time — confirm the exact current one with

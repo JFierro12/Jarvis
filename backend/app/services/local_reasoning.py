@@ -55,7 +55,12 @@ class LocalLanguageReasoningProvider:
 
         proposed = parsed.get("proposed_tool_call")
         tool_call = (
-            ProposedToolCall(tool_name=proposed["tool_name"], target=proposed["target"], arguments=proposed.get("arguments", {}))
+            ProposedToolCall(
+                tool_name=proposed["tool_name"],
+                target=proposed["target"],
+                content=proposed.get("content", ""),
+                arguments=proposed.get("arguments", {}),
+            )
             if proposed
             else None
         )

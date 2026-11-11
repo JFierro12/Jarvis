@@ -22,4 +22,9 @@ def dashboard(settings: Settings = Depends(get_settings)) -> HTMLResponse:
     """
     html = _INDEX_PATH.read_text()
     token = next(iter(settings.auth_token_set), "")
-    return HTMLResponse(html.replace("{{TOKEN}}", token))
+    # The page needs to know which speech-to-text path is configured so it
+    # can pick between capturing audio for local Whisper transcription and
+    # the browser's own (cloud) Web Speech API — same injection mechanism
+    # as the token rather than an extra round trip for one string.
+    html = html.replace("{{TOKEN}}", token).replace("{{STT_PROVIDER}}", settings.stt_provider)
+    return HTMLResponse(html)

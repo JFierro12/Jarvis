@@ -13,6 +13,13 @@ from app.services.reasoning import UNTRUSTED_SOURCES
 # call beyond what PolicyEngine/evaluate_tool_call already gates on
 # (tool_name, target) — see docs/THREAT_MODEL.md.
 #
+# `content` is the one deliberate exception, for write_file/append_file:
+# text has to come from somewhere, and encoding a note's body into `target`
+# alongside its path is worse in every way. It does not widen the boundary
+# — it can't choose which tool runs or which path is touched, and the path
+# is still resolved against JARVIS_ALLOWED_FOLDERS before anything is
+# written. It is inert data landing in a permitted file, never a command.
+#
 # Shared (not underscore-prefixed) because LocalLanguageReasoningProvider
 # (app/services/local_reasoning.py) imports this and SYSTEM_PROMPT below
 # verbatim — both providers must uphold the same prompt-injection contract.
@@ -29,9 +36,10 @@ REASON_JSON_SCHEMA: Dict[str, Any] = {
                     "properties": {
                         "tool_name": {"type": "string"},
                         "target": {"type": "string"},
+                        "content": {"type": "string"},
                         "arguments": {"type": "object", "properties": {}, "additionalProperties": False},
                     },
-                    "required": ["tool_name", "target", "arguments"],
+                    "required": ["tool_name", "target", "content", "arguments"],
                     "additionalProperties": False,
                 },
             ]
@@ -117,8 +125,11 @@ When the user's question matches what a listed tool does, propose that
 tool rather than guessing or saying the information is unavailable — e.g.
 any question about the current time uses get_current_time; anything about
 this computer/PC's CPU, RAM, or status uses get_pc_status; turning a light
-or other device on/off uses control_home_device. Don't propose a tool that
-isn't in the available-tools list for this request.
+or other device on/off uses control_home_device; what windows/apps are
+currently open uses list_open_windows (never guess or invent window
+names — you have no way to know what's open without calling it); what's
+visible on screen uses take_screenshot. Don't propose a tool that isn't in
+the available-tools list for this request.
 
 For open_website, target is "<site_key>" or "<site_key> <search terms>" —
 valid site_key values: youtube, google, netflix, peacock, hulu,
@@ -149,7 +160,35 @@ right now — CONVERSATION_HISTORY only tells you what you said in the past,
 never the current state of anything. If the user asks to open a site again
 (even one you already opened earlier in this same conversation), propose
 open_website again exactly as if it were the first time; never refuse or
-claim something is "already open" on that basis."""
+claim something is "already open" on that basis.
+
+launch_app, focus_app, close_app, list_open_windows, and take_screenshot
+control the desktop itself, separate from open_website/close_website's
+browser-only scope. For launch_app/focus_app/close_app, target is the
+application name as the user said it (e.g. "notepad", "spotify") — you
+don't need to know it's already running or its exact process name.
+close_app may trigger the app's own unsaved-work prompt; you have no way
+to detect or answer that prompt, so say only that you've asked it to
+close, never that it definitely closed. list_open_windows takes no
+target. For take_screenshot, target is the user's question about the
+screen verbatim (e.g. "what error is showing", "what am I looking at") —
+if they didn't ask something specific, leave target empty. You have no
+persistent knowledge of what's on screen between turns; each
+take_screenshot call is a fresh, one-time look, not an ongoing view.
+
+File tools (list_files, read_file, write_file, append_file, create_folder,
+move_file, delete_file) work only inside folders the user has explicitly
+permitted; a path outside them is refused no matter how it's phrased, so
+don't try to work around a refusal. target is the path as the user
+described it ("notes.txt", "project ideas.md"); bare names land in the
+first permitted folder, which is the right default — don't invent absolute
+paths like C:\\Users\\... that the user never said. For move_file, target is
+"<source> to <destination>". For write_file and append_file, put the file's
+text in the separate `content` field, never in target: target is only ever
+the path. write_file creates a new file and fails if one already exists —
+use append_file to add to an existing file. delete_file goes to the
+Recycle Bin, so say it's recoverable rather than implying it's gone
+forever. Leave `content` as an empty string for every other tool."""
 
 
 class LanguageReasoningUnavailableError(Exception):
@@ -218,7 +257,12 @@ class AnthropicLanguageReasoningProvider:
 
         proposed = payload.get("proposed_tool_call")
         tool_call = (
-            ProposedToolCall(tool_name=proposed["tool_name"], target=proposed["target"], arguments=proposed.get("arguments", {}))
+            ProposedToolCall(
+                tool_name=proposed["tool_name"],
+                target=proposed["target"],
+                content=proposed.get("content", ""),
+                arguments=proposed.get("arguments", {}),
+            )
             if proposed
             else None
         )

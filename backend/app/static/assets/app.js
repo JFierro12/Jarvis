@@ -1,9 +1,251 @@
 (() => {
   const TOKEN = document.querySelector('meta[name="jarvis-token"]').content;
+  const STT_PROVIDER = (document.querySelector('meta[name="jarvis-stt-provider"]') || {}).content || "mock";
   const authHeaders = { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" };
 
   function api(path, options = {}) {
     return fetch(path, { ...options, headers: { ...authHeaders, ...(options.headers || {}) } });
+  }
+
+  // ---------- Local speech recognition ----------
+  // Drop-in stand-in for the browser's SpeechRecognition, backed by
+  // /v1/transcribe (local faster-whisper) instead of a cloud service. It
+  // deliberately mimics the same start/stop/addEventListener surface and
+  // the same `results[i][0].transcript` event shape, so the wake-word
+  // state machine below consumes it without caring which one it got.
+  //
+  // Raw PCM is captured and encoded to WAV here rather than using
+  // MediaRecorder: MediaRecorder's WebM chunks aren't independently
+  // decodable (only the first carries the container header), so slicing
+  // out just the speech portion of a continuous recording doesn't produce
+  // a valid file. Raw PCM slices cleanly, which is what makes the
+  // pre-roll buffer below possible.
+  const VAD = {
+    frameMs: 50,
+    // Speech must exceed the ambient floor by this factor to count — an
+    // absolute threshold alone misfires in a quiet room and goes deaf in
+    // a loud one.
+    floorMultiplier: 2.5,
+    minRms: 0.012,
+    silenceMsToEnd: 900,
+    minUtteranceMs: 250,
+    maxUtteranceMs: 15000,
+    // Audio kept from just *before* speech was detected, so the first
+    // syllable of "Jarvis" isn't clipped off by the detector's own lag.
+    prerollMs: 300,
+  };
+
+  function encodeWav(samples, sampleRate) {
+    const buffer = new ArrayBuffer(44 + samples.length * 2);
+    const view = new DataView(buffer);
+    const writeString = (offset, text) => {
+      for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i));
+    };
+    writeString(0, "RIFF");
+    view.setUint32(4, 36 + samples.length * 2, true);
+    writeString(8, "WAVEfmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeString(36, "data");
+    view.setUint32(40, samples.length * 2, true);
+    let offset = 44;
+    for (let i = 0; i < samples.length; i++) {
+      const clamped = Math.max(-1, Math.min(1, samples[i]));
+      view.setInt16(offset, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
+      offset += 2;
+    }
+    return new Blob([view], { type: "audio/wav" });
+  }
+
+  class LocalSpeechRecognition {
+    constructor() {
+      // Accepted for interface compatibility with SpeechRecognition;
+      // continuous listening is simply how this one always works, and
+      // there are no interim results from a batch transcriber.
+      this.continuous = true;
+      this.interimResults = false;
+      this.lang = "en-US";
+      this.singleShot = false;
+      this._listeners = {};
+      this._running = false;
+      this._stream = null;
+      this._audioContext = null;
+      this._source = null;
+      this._processor = null;
+    }
+
+    addEventListener(type, callback) {
+      (this._listeners[type] = this._listeners[type] || []).push(callback);
+    }
+
+    _emit(type, event) {
+      (this._listeners[type] || []).forEach((callback) => callback(event));
+    }
+
+    _emitTranscript(text) {
+      const result = [{ transcript: text }];
+      result.isFinal = true;
+      this._emit("result", { resultIndex: 0, results: [result] });
+    }
+
+    async start() {
+      if (this._running) throw new Error("already started");
+      this._running = true;
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        });
+      } catch (err) {
+        this._running = false;
+        this._emit("error", { error: err && err.name === "NotAllowedError" ? "not-allowed" : "audio-capture" });
+        this._emit("end", {});
+        return;
+      }
+
+      this._stream = stream;
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      this._audioContext = audioContext;
+      const sampleRate = audioContext.sampleRate;
+      const source = audioContext.createMediaStreamSource(stream);
+      this._source = source;
+
+      const frameSize = 4096;
+      const processor = audioContext.createScriptProcessor(frameSize, 1, 1);
+      this._processor = processor;
+
+      const prerollFrames = Math.ceil((VAD.prerollMs / 1000) * sampleRate);
+      let preroll = [];
+      let prerollLength = 0;
+      let speaking = false;
+      let utterance = [];
+      let utteranceLength = 0;
+      let silenceMs = 0;
+      let noiseFloor = 0.01;
+
+      const finish = () => {
+        const durationMs = (utteranceLength / sampleRate) * 1000;
+        const samples = new Float32Array(utteranceLength);
+        let offset = 0;
+        for (const chunk of utterance) {
+          samples.set(chunk, offset);
+          offset += chunk.length;
+        }
+        speaking = false;
+        utterance = [];
+        utteranceLength = 0;
+        silenceMs = 0;
+        if (durationMs >= VAD.minUtteranceMs) {
+          console.debug(`[JARVIS] captured utterance: ${Math.round(durationMs)}ms, transcribing…`);
+          this._transcribe(encodeWav(samples, sampleRate));
+        } else {
+          console.debug(`[JARVIS] ignored blip: ${Math.round(durationMs)}ms`);
+        }
+      };
+
+      processor.onaudioprocess = (event) => {
+        if (!this._running) return;
+        const input = event.inputBuffer.getChannelData(0);
+        let sumSquares = 0;
+        for (let i = 0; i < input.length; i++) sumSquares += input[i] * input[i];
+        const rms = Math.sqrt(sumSquares / input.length);
+        const frameMs = (input.length / sampleRate) * 1000;
+        const threshold = Math.max(noiseFloor * VAD.floorMultiplier, VAD.minRms);
+
+        if (!speaking) {
+          // Track the ambient floor only while nobody is talking, so a long
+          // utterance can't drag the threshold up over its own voice.
+          noiseFloor = noiseFloor * 0.95 + rms * 0.05;
+          const copy = new Float32Array(input);
+          preroll.push(copy);
+          prerollLength += copy.length;
+          while (prerollLength - preroll[0].length >= prerollFrames) {
+            prerollLength -= preroll.shift().length;
+          }
+          if (rms > threshold) {
+            console.debug(`[JARVIS] speech detected (rms ${rms.toFixed(4)} > ${threshold.toFixed(4)})`);
+            speaking = true;
+            silenceMs = 0;
+            utterance = preroll.slice();
+            utteranceLength = prerollLength;
+            preroll = [];
+            prerollLength = 0;
+          }
+          return;
+        }
+
+        const copy = new Float32Array(input);
+        utterance.push(copy);
+        utteranceLength += copy.length;
+        silenceMs = rms > threshold ? 0 : silenceMs + frameMs;
+        const durationMs = (utteranceLength / sampleRate) * 1000;
+        if (silenceMs >= VAD.silenceMsToEnd || durationMs >= VAD.maxUtteranceMs) finish();
+      };
+
+      source.connect(processor);
+      // ScriptProcessorNode only runs while connected to a destination;
+      // a zero-gain node keeps it ticking without echoing the mic to the
+      // speakers.
+      const mute = audioContext.createGain();
+      mute.gain.value = 0;
+      processor.connect(mute);
+      mute.connect(audioContext.destination);
+
+      this._emit("start", {});
+    }
+
+    async _transcribe(blob) {
+      try {
+        const buffer = await blob.arrayBuffer();
+        let binary = "";
+        const bytes = new Uint8Array(buffer);
+        const CHUNK = 0x8000;
+        for (let i = 0; i < bytes.length; i += CHUNK) {
+          binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+        }
+        const res = await api("/v1/transcribe", {
+          method: "POST",
+          body: JSON.stringify({ audio_base64: btoa(binary), language: this.lang }),
+        });
+        if (!res.ok) {
+          this._emit("error", { error: "network" });
+          return;
+        }
+        const data = await res.json();
+        const text = (data.text || "").trim();
+        // Silence that slipped past the VAD transcribes to nothing —
+        // that's routine, not a failure worth surfacing.
+        if (!text) return;
+        this._emitTranscript(text);
+        if (this.singleShot) this.stop();
+      } catch (_err) {
+        this._emit("error", { error: "network" });
+      }
+    }
+
+    stop() {
+      if (!this._running) return;
+      this._running = false;
+      try {
+        if (this._processor) this._processor.disconnect();
+        if (this._source) this._source.disconnect();
+        if (this._audioContext) this._audioContext.close();
+        if (this._stream) this._stream.getTracks().forEach((track) => track.stop());
+      } catch (_err) {
+        // Teardown races (context already closed, track already ended)
+        // aren't worth surfacing — the listener is stopping either way.
+      }
+      this._processor = null;
+      this._source = null;
+      this._audioContext = null;
+      this._stream = null;
+      this._emit("end", {});
+    }
   }
 
   // ---------- System stats ----------
@@ -133,8 +375,20 @@
     "control_home_device",
     "open_website",
     "close_website",
+    "launch_app",
+    "focus_app",
+    "close_app",
+    "list_open_windows",
+    "take_screenshot",
+    "list_files",
+    "read_file",
+    "write_file",
+    "append_file",
+    "create_folder",
+    "move_file",
+    "delete_file",
   ];
-  const GRANTED_PERMISSIONS = ["pc_agent", "smart_home"];
+  const GRANTED_PERMISSIONS = ["pc_agent", "smart_home", "os_control", "screen_capture", "file_access"];
 
   // Sites open_website can actually type a search query into (see
   // app/services/browser_automation.py's SEARCHABLE_SITES) — used here only
@@ -434,6 +688,8 @@
         body: JSON.stringify({
           tool_name: call.tool_name,
           target: call.target,
+          // Body text for write_file/append_file; empty for everything else.
+          content: call.content || "",
           arguments: call.arguments || {},
           confirmed,
           granted_permissions: GRANTED_PERMISSIONS,
@@ -586,17 +842,23 @@
     }
   });
 
-  // ---------- Microphone (browser Web Speech API — no backend involvement) ----------
-  // No on-device STT here (unlike the iOS app's Apple Speech framework path)
-  // — recognition runs through whatever backend the browser/webview uses,
-  // which for Chromium is Google's cloud speech service. Wake-word mode is
-  // off by default and always shown with a visible indicator (the toggle's
-  // dot + the orb's amber ring) — see docs/PRIVACY.md's "no background
-  // listening" stance; this is an explicit, foreground, opt-in exception to
-  // it, not silent always-on recording.
+  // ---------- Microphone ----------
+  // With JARVIS_STT_PROVIDER=local, transcription is on-device via
+  // faster-whisper (LocalSpeechRecognition above) — no cloud service, works
+  // offline, and not dependent on the embedded browser engine granting a
+  // cloud speech API a microphone. Otherwise this falls back to the
+  // browser's own Web Speech API, which for Chromium means Google's cloud.
+  // Wake-word mode is off by default and always shown with a visible
+  // indicator (the toggle's dot + the orb's amber ring) — see
+  // docs/PRIVACY.md's "no background listening" stance; this is an
+  // explicit, foreground, opt-in exception to it, not silent always-on
+  // recording.
   const micBtn = document.getElementById("mic-btn");
   const wakeToggleBtn = document.getElementById("wake-toggle");
-  const SpeechRecognitionImpl = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const browserSpeechImpl = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const usingLocalStt = STT_PROVIDER === "local";
+  const SpeechRecognitionImpl = usingLocalStt ? LocalSpeechRecognition : browserSpeechImpl;
+  console.info("[JARVIS] speech recognition:", usingLocalStt ? "local (faster-whisper)" : "browser Web Speech API");
 
   let wakeModeEnabled = false;
   let onSpeakingChanged = () => {};
@@ -616,6 +878,11 @@
     pushToTalk.continuous = false;
     pushToTalk.interimResults = true;
     pushToTalk.lang = "en-US";
+    // Local transcription is batch, not streaming: there are no interim
+    // results to show while speaking, so it has to stop itself once it has
+    // the one utterance rather than waiting for an isFinal flag that only
+    // the streaming cloud API produces.
+    pushToTalk.singleShot = true;
 
     let pushToTalkActive = false;
 

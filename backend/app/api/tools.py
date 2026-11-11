@@ -1,10 +1,13 @@
+import base64
 from datetime import datetime
 
 import psutil
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import update
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
+from app.core.config import Settings, get_settings
 from app.core.security import require_bearer_token
 from app.memory.database import get_db_session
 from app.memory.models import MemoryRow
@@ -16,6 +19,25 @@ from app.models.schemas import (
     ToolProposeResponse,
 )
 from app.services.browser_automation import BrowserAutomationError, get_browser_automation_service
+from app.services.file_operations import (
+    FileOperationError,
+    append_file,
+    create_folder,
+    delete_file,
+    list_files,
+    move_file,
+    read_file,
+    write_file,
+)
+from app.services.os_automation import (
+    OSAutomationError,
+    close_app,
+    focus_app,
+    launch_app,
+    list_open_windows,
+    take_screenshot_bytes,
+)
+from app.services.vision import VisionUnavailableError, get_vision_provider
 from app.tools.policy import evaluate_tool_call
 
 router = APIRouter()
@@ -44,6 +66,7 @@ async def execute_tool(
     payload: ToolExecuteRequest,
     _token: str = Depends(require_bearer_token),
     db: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
 ) -> ToolExecuteResponse:
     # Re-run policy at execution time too — a client is never trusted to
     # have enforced this itself, and a stale "allow" from `propose` is not
@@ -107,6 +130,64 @@ async def execute_tool(
     if payload.tool_name == "close_website":
         site_key = payload.target.strip().lower()
         output = await get_browser_automation_service().close_site(site_key)
+        return ToolExecuteResponse(success=True, output=output)
+
+    if payload.tool_name == "launch_app":
+        try:
+            output = await run_in_threadpool(launch_app, payload.target)
+        except OSAutomationError as exc:
+            return ToolExecuteResponse(success=False, output=str(exc))
+        return ToolExecuteResponse(success=True, output=output)
+
+    if payload.tool_name == "focus_app":
+        try:
+            output = await run_in_threadpool(focus_app, payload.target)
+        except OSAutomationError as exc:
+            return ToolExecuteResponse(success=False, output=str(exc))
+        return ToolExecuteResponse(success=True, output=output)
+
+    if payload.tool_name == "close_app":
+        try:
+            output = await run_in_threadpool(close_app, payload.target)
+        except OSAutomationError as exc:
+            return ToolExecuteResponse(success=False, output=str(exc))
+        return ToolExecuteResponse(success=True, output=output)
+
+    if payload.tool_name == "list_open_windows":
+        windows = await run_in_threadpool(list_open_windows)
+        output = ", ".join(windows) if windows else "No visible windows found."
+        return ToolExecuteResponse(success=True, output=output)
+
+    if payload.tool_name == "take_screenshot":
+        try:
+            image_bytes = await run_in_threadpool(take_screenshot_bytes)
+        except OSAutomationError as exc:
+            return ToolExecuteResponse(success=False, output=str(exc))
+        image_b64 = base64.b64encode(image_bytes).decode("ascii")
+        question = payload.target.strip() or "Describe what's currently visible on the screen."
+        provider = get_vision_provider(settings.vision_provider)
+        try:
+            result = await run_in_threadpool(provider.analyze, image_b64, question)
+        except VisionUnavailableError as exc:
+            return ToolExecuteResponse(success=False, output=f"Screenshot captured but analysis failed: {exc}")
+        return ToolExecuteResponse(success=True, output=result.answer)
+
+    # ---- File operations (every path re-checked against the permitted
+    # roots inside file_operations, never trusted from the request) ----
+    file_tools = {
+        "list_files": lambda: list_files(payload.target, settings.allowed_folders),
+        "read_file": lambda: read_file(payload.target, settings.allowed_folders),
+        "write_file": lambda: write_file(payload.target, payload.content, settings.allowed_folders),
+        "append_file": lambda: append_file(payload.target, payload.content, settings.allowed_folders),
+        "create_folder": lambda: create_folder(payload.target, settings.allowed_folders),
+        "move_file": lambda: move_file(payload.target, settings.allowed_folders),
+        "delete_file": lambda: delete_file(payload.target, settings.allowed_folders),
+    }
+    if payload.tool_name in file_tools:
+        try:
+            output = await run_in_threadpool(file_tools[payload.tool_name])
+        except FileOperationError as exc:
+            return ToolExecuteResponse(success=False, output=str(exc))
         return ToolExecuteResponse(success=True, output=output)
 
     raise HTTPException(
