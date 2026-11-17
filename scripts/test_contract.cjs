@@ -1,0 +1,10 @@
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const root = path.resolve(__dirname, "..");
+const { validateTurn } = require(path.join(root, "backend/app/static/assets/runtime-contract.js"));
+const fixture = JSON.parse(fs.readFileSync(path.join(root, "contracts/turn-response.json")));
+assert.equal(validateTurn(fixture).action_id, "action-1");
+assert.throws(() => validateTurn({ ...fixture, contract_version: "3" }));
+assert.throws(() => validateTurn({ ...fixture, decision: "execute_without_policy" }));
+console.log("Desktop v2 contract fixture passed");

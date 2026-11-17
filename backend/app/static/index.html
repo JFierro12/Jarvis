@@ -3,7 +3,6 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="jarvis-token" content="{{TOKEN}}" />
   <meta name="jarvis-stt-provider" content="{{STT_PROVIDER}}" />
   <title>J.A.R.V.I.S.</title>
   <link rel="icon" href="/assets/icon.png" />
@@ -108,6 +107,20 @@
         </div>
       </div>
 
+      <div class="card" id="card-mic">
+        <div class="card-head">
+          <span class="card-title">Microphone</span>
+        </div>
+        <!-- Device labels are only exposed by the browser after microphone
+             permission has been granted, so before that this list is empty
+             and the hint below explains why rather than showing an
+             unexplained empty dropdown. -->
+        <select id="mic-device" class="mic-select" aria-label="Microphone input device">
+          <option value="">System default</option>
+        </select>
+        <div class="mic-hint" id="mic-hint">Using the system default device.</div>
+      </div>
+
       <div class="card" id="card-clock">
         <div class="card-head">
           <span class="card-title">Local Time</span>
@@ -160,6 +173,10 @@
     </main>
   </div>
 
+  <script src="/assets/runtime-contract.js"></script>
+  <!-- Voice-path state machines, extracted so they are testable under
+       `node --test` (see assets/voice.test.js). Must load before app.js. -->
+  <script src="/assets/voice.js"></script>
   <script src="/assets/app.js"></script>
 </body>
 </html>

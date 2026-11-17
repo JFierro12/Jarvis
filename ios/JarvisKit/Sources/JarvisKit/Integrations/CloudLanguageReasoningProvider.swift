@@ -36,7 +36,8 @@ public final class CloudLanguageReasoningProvider: LanguageReasoningProvider, @u
     public func reason(_ request: ReasoningRequest) async throws -> ReasoningResponse {
         do {
             let body = RequestBody(
-                context: request.context.items.map { ContextItemBody(source: $0.source.rawValue, label: $0.label, content: $0.content) },
+                context: request.context.items.filter { $0.source != .systemPolicy }
+                    .map { ContextItemBody(source: $0.source.rawValue, label: $0.label, content: $0.content) },
                 question: request.question,
                 availableTools: request.availableTools
             )

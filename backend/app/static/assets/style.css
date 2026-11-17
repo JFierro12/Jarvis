@@ -17,6 +17,13 @@
 
 * { box-sizing: border-box; }
 
+.runtime-connection { display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
+.runtime-connection input, .runtime-connection select, .runtime-connection button {
+  min-width: 0; width: 100%; padding: 8px; background: #061a20;
+  color: var(--text); border: 1px solid var(--panel-border); border-radius: var(--radius);
+}
+.runtime-connection output { overflow-wrap: anywhere; font-size: 12px; }
+
 html, body {
   margin: 0;
   height: 100%;
@@ -632,4 +639,38 @@ body::after {
 #composer-send:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* ---- Microphone device picker ---- */
+.mic-select {
+  width: 100%;
+  margin-top: 2px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: rgba(0, 20, 28, 0.7);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  outline: none;
+}
+
+.mic-select:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-dim);
+}
+
+/* The native dropdown list is drawn by the OS, not the page, so its options
+   need an explicit background: inheriting the panel's translucent fill leaves
+   unreadable text on some platforms. */
+.mic-select option {
+  color: var(--text);
+  background: #001018;
+}
+
+.mic-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-dim);
 }

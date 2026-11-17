@@ -1,10 +1,17 @@
+import os
 from functools import lru_cache
+from typing import Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Which dotenv file to read, overridable so tests can point at a path
+# that does not exist. Disabling dotenv alone is not isolation — process
+# environment variables still apply — so tests must neutralize both.
+_ENV_FILE = os.environ.get("JARVIS_ENV_FILE", ".env")
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="JARVIS_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="JARVIS_", env_file=_ENV_FILE, extra="ignore")
 
     auth_tokens: str = "dev-local-token"
     database_url: str = "sqlite:///./jarvis.db"
@@ -38,6 +45,34 @@ class Settings(BaseSettings):
     whisper_device: str = "cpu"
     whisper_compute_type: str = "int8"
 
+    # Credential for the human-approval path, deliberately separate from
+    # auth_tokens. The packaged desktop host generates one per launch and
+    # hands it to its own UI; it is never served in page HTML. Empty means
+    # no approval path exists (fail closed), not an open one.
+    approval_key: str = ""
+
+    # Bumped when policy-relevant configuration changes, so approvals
+    # decided under the old rules stop being spendable.
+    policy_revision: str = "v1"
+    live_mode: bool = False
+    runtime_database: str = "jarvis-runtime.db"
+    allowed_hosts: str = "127.0.0.1,localhost,testserver"
+    allowed_origins: str = "http://127.0.0.1:8756,http://localhost:8756"
+    local_agent_enabled: bool = False
+    local_device_id: str = "desktop"
+    remote_bind_host: str = ""
+    remote_port: int = 8757
+    tls_certificate: str = ""
+    tls_private_key: str = ""
+
+    # Capabilities this installation grants, comma-separated (e.g.
+    # "os_control,file_access,screen_capture"). The authority for
+    # permissions lives here, server-side: the client used to send its own
+    # `granted_permissions` list, which meant any caller could claim any
+    # capability and the policy check became decorative. Empty by default
+    # so a fresh install grants nothing until asked.
+    granted_permissions: str = ""
+
     # Comma-separated folders JARVIS may read/write. Empty by default:
     # file tools refuse everything until a root is explicitly granted,
     # rather than defaulting to the whole drive or the process's cwd.
@@ -51,6 +86,53 @@ class Settings(BaseSettings):
     local_llm_model: str = "qwen2.5:14b-instruct-q4_K_M"
     # Generous — local inference on a consumer GPU is slower than a cloud API.
     local_llm_timeout_seconds: float = 60.0
+    # Which system prompt the *local* provider sends. "production" is the full
+    # ~4k-token prompt in anthropic_reasoning.py, which a general-purpose local
+    # model needs in order to behave. "tuned" sends the short distilled prompt
+    # from training/jarvis_train/contract.py, and is only correct for a model
+    # fine-tuned against it (see training/README.md) — the behaviour those
+    # 4k tokens describe then lives in the weights instead, which cuts prefill
+    # on every voice turn. Wrong setting, wrong behaviour, so it defaults to
+    # the safe one and must be opted into explicitly.
+    local_llm_prompt_profile: str = "production"
+
+    # --- Location, weather and local news -------------------------------
+    # The user's saved default location. Empty by default and never inferred:
+    # the backend machine's timezone, locale and IP address are all wrong
+    # answers to "where is the user", so with nothing set here JARVIS asks for
+    # a city instead of guessing one. Latitude/longitude without each other is
+    # treated as unconfigured, not as half a location.
+    home_location_label: str = ""
+    home_latitude: Optional[float] = None
+    home_longitude: Optional[float] = None
+    home_timezone: str = ""
+    home_country_code: str = ""
+    # "us" (Fahrenheit/mph/inch) or "metric" (Celsius/km·h⁻¹/mm).
+    preferred_units: str = "us"
+
+    # "mock" (default, deterministic, no network), "nws" for the US National
+    # Weather Service, or "open_meteo". NWS needs no API key and is the only
+    # one verified end-to-end from this machine; see docs/OVERNIGHT_LOG.md for
+    # why the Open-Meteo forecast host could not be reached here.
+    weather_provider: str = "mock"
+    # NWS asks automated clients to identify themselves. Generic by design —
+    # never put a personal email address here; it is sent to a third party on
+    # every request.
+    weather_user_agent: str = "JarvisAssistant/0.1 (personal assistant)"
+    weather_cache_seconds: float = 600.0
+    weather_timeout_seconds: float = 12.0
+
+    # "mock" (default) or "rss". Comma-separated feed URLs; each may be
+    # prefixed "<region>|<url>" to mark it as local to a place.
+    news_provider: str = "mock"
+    news_feeds: str = ""
+    news_cache_seconds: float = 900.0
+    news_timeout_seconds: float = 12.0
+    news_max_items: int = 8
+
+    @property
+    def granted_permission_set(self) -> set:
+        return {p.strip() for p in self.granted_permissions.split(",") if p.strip()}
 
     @property
     def auth_token_set(self) -> set[str]:

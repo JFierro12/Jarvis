@@ -139,7 +139,10 @@ class ToolProposeRequest(BaseModel):
     tool_name: str
     arguments: Dict[str, str] = Field(default_factory=dict)
     target: str = ""
-    granted_permissions: List[str] = Field(default_factory=list)
+    content: str = ""
+    session_id: str = ""
+    origin_device: str = ""
+    target_device: str = ""
 
 
 class ToolProposeResponse(BaseModel):
@@ -147,20 +150,36 @@ class ToolProposeResponse(BaseModel):
     reason: Optional[str] = None
     confirmation_summary: Optional[str] = None
     risk_level: Optional[str] = None
+    # Present only when decision == "require_confirmation". An id to ask
+    # about, not a credential: it authorizes nothing until the separate
+    # approval path marks it approved.
+    action_id: Optional[str] = None
+    confirmation_expires_in_seconds: Optional[int] = None
+
+
+class ActionApprovalResponse(BaseModel):
+    action_id: str
+    state: str
 
 
 class ToolExecuteRequest(BaseModel):
-    tool_name: str
+    tool_name: str = ""
     arguments: Dict[str, str] = Field(default_factory=dict)
     target: str = ""
     content: str = ""
-    confirmed: bool = False
-    granted_permissions: List[str] = Field(default_factory=list)
+    # For anything policy gates behind confirmation, this is the only
+    # accepted route: the server executes the stored canonical action, so
+    # the fields above are ignored when it is set.
+    action_id: str = ""
 
 
 class ToolExecuteResponse(BaseModel):
     success: bool
     output: str
+    # Lets a caller distinguish "ran now" from "already ran" after an
+    # ambiguous timeout, instead of retrying a side effect.
+    execution_id: Optional[str] = None
+    state: str = "completed"
 
 
 class PCStatusResponse(BaseModel):

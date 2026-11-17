@@ -35,6 +35,16 @@ TOOL_DEFINITIONS: Dict[str, ToolDefinition] = {
         ToolDefinition("search_memory", "Searches saved memories.", "read_only"),
         ToolDefinition("delete_memory", "Deletes one memory.", "destructive"),
         ToolDefinition("delete_all_memories", "Deletes all memories.", "destructive"),
+        ToolDefinition(
+            "get_weather",
+            "Reads current conditions and a short forecast for a saved or named location.",
+            "read_only",
+        ),
+        ToolDefinition(
+            "get_local_news",
+            "Reads recent headlines from configured news feeds for a saved or named location.",
+            "read_only",
+        ),
         ToolDefinition("get_device_status", "Reads glasses connection/diagnostics state.", "read_only"),
         ToolDefinition("get_pc_status", "Reads read-only PC health metrics.", "read_only", ["pc_agent"]),
         ToolDefinition(

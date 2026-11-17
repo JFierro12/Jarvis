@@ -1,11 +1,33 @@
 (() => {
-  const TOKEN = document.querySelector('meta[name="jarvis-token"]').content;
+  let credentials = null;
+  let conversationId = "";
+  let activeActionId = "";
+  let turnEpoch = 0;
+  async function cancelCurrentTurn() {
+    turnEpoch += 1;
+    stopSpeaking();
+    clearPendingVoiceConfirmation();
+    if (activeActionId) {
+      const actionId = activeActionId;
+      activeActionId = "";
+      const response = await api(`/v1/actions/${actionId}/cancel`, { method: "POST" });
+      if (!response.ok) addMessage("error", "Execution has already started and may not be interruptible.");
+    }
+  }
   const STT_PROVIDER = (document.querySelector('meta[name="jarvis-stt-provider"]') || {}).content || "mock";
-  const authHeaders = { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" };
 
   function api(path, options = {}) {
-    return fetch(path, { ...options, headers: { ...authHeaders, ...(options.headers || {}) } });
+    if (!credentials) return Promise.reject(new Error("Open the native desktop app or pair this device first."));
+    return fetch(path, { ...options, headers: {
+      Authorization: `Bearer ${credentials.access_token}`, "Content-Type": "application/json",
+      ...(options.headers || {}),
+    } });
   }
+
+  window.jarvisBootstrap = async (session) => {
+    credentials = session;
+    await ensureSession();
+  };
 
   // ---------- Local speech recognition ----------
   // Drop-in stand-in for the browser's SpeechRecognition, backed by
@@ -62,6 +84,14 @@
     return new Blob([view], { type: "audio/wav" });
   }
 
+  // Shared with speak()/setSpeaking() below. While the assistant's reply is
+  // playing, and for a short tail afterwards covering speaker decay, captured
+  // audio is discarded instead of transcribed -- otherwise continuous
+  // listening hears the assistant's own voice, treats it as a new user turn,
+  // and can answer itself in a loop. Browser echo cancellation reduces this
+  // but is not reliable enough with external speakers to depend on.
+  const speechGate = new JarvisVoice.SpeechGate({ tailMs: 400 });
+
   class LocalSpeechRecognition {
     constructor() {
       // Accepted for interface compatibility with SpeechRecognition;
@@ -77,6 +107,9 @@
       this._audioContext = null;
       this._source = null;
       this._processor = null;
+      // Invalidated on stop(), so an in-flight transcription cannot post a
+      // turn after the user has stopped listening.
+      this._turns = new JarvisVoice.TurnSequencer();
     }
 
     addEventListener(type, callback) {
@@ -98,17 +131,33 @@
       this._running = true;
       let stream;
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-        });
+        // The saved microphone is a preference, not a requirement: with an
+        // `exact` deviceId, unplugging that microphone breaks voice input
+        // permanently instead of falling back to the default device.
+        const savedDeviceId = JarvisVoice.loadSavedDeviceId(window.localStorage);
+        stream = await navigator.mediaDevices.getUserMedia(
+          JarvisVoice.audioConstraints(savedDeviceId)
+        );
       } catch (err) {
         this._running = false;
-        this._emit("error", { error: err && err.name === "NotAllowedError" ? "not-allowed" : "audio-capture" });
+        // "Access denied" shown to someone who has no microphone at all
+        // sends them to a permission panel that is already correct.
+        const classified = JarvisVoice.classifyMicError(err);
+        this._emit("error", { error: classified.code, detail: classified.message });
         this._emit("end", {});
         return;
       }
 
       this._stream = stream;
+      // Permission has now definitely been granted, which is the moment the
+      // browser starts exposing real device labels. Tell the device picker so
+      // it can replace its "allow access to choose a device" hint with the
+      // actual list, rather than waiting for a reload.
+      try {
+        window.dispatchEvent(new Event("jarvis-mic-permission-granted"));
+      } catch (_err) {
+        // Event construction is not worth failing a capture over.
+      }
       const audioContext = new (window.AudioContext || window.webkitAudioContext)();
       this._audioContext = audioContext;
       const sampleRate = audioContext.sampleRate;
@@ -150,6 +199,25 @@
 
       processor.onaudioprocess = (event) => {
         if (!this._running) return;
+
+        // Self-transcription guard. Anything heard while the assistant is
+        // speaking is presumed to be its own voice: drop the frame, abandon
+        // any utterance in progress, and do NOT fold the level into the
+        // noise floor -- learning the ambient floor from the assistant's own
+        // playback would desensitise the detector to the user for seconds
+        // afterwards.
+        if (speechGate.isSuppressed(performance.now())) {
+          if (speaking) {
+            speaking = false;
+            utterance = [];
+            utteranceLength = 0;
+            silenceMs = 0;
+          }
+          preroll = [];
+          prerollLength = 0;
+          return;
+        }
+
         const input = event.inputBuffer.getChannelData(0);
         let sumSquares = 0;
         for (let i = 0; i < input.length; i++) sumSquares += input[i] * input[i];
@@ -200,6 +268,11 @@
     }
 
     async _transcribe(blob) {
+      // Transcription is asynchronous, so a result can arrive after the user
+      // stopped listening or after they started a new utterance. Delivering
+      // it then posts a turn they did not just ask for. The generation is
+      // captured before the request and checked after it.
+      const generation = this._turns.begin();
       try {
         const buffer = await blob.arrayBuffer();
         let binary = "";
@@ -221,6 +294,10 @@
         // Silence that slipped past the VAD transcribes to nothing —
         // that's routine, not a failure worth surfacing.
         if (!text) return;
+        if (!this._turns.accept(generation)) {
+          console.debug("[JARVIS] dropped a stale transcription from a cancelled turn");
+          return;
+        }
         this._emitTranscript(text);
         if (this.singleShot) this.stop();
       } catch (_err) {
@@ -231,6 +308,8 @@
     stop() {
       if (!this._running) return;
       this._running = false;
+      // Anything still being transcribed belongs to a turn the user ended.
+      this._turns.invalidate();
       try {
         if (this._processor) this._processor.disconnect();
         if (this._source) this._source.disconnect();
@@ -293,59 +372,101 @@
   updateClock();
   setInterval(updateClock, 1000);
 
-  // ---------- Weather (client-side only, no backend involvement) ----------
-  const WEATHER_CODES = {
-    0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
-    45: "Fog", 48: "Fog", 51: "Light drizzle", 61: "Light rain", 63: "Rain",
-    65: "Heavy rain", 71: "Light snow", 73: "Snow", 75: "Heavy snow",
-    80: "Rain showers", 95: "Thunderstorm",
-  };
+  // ---------- Weather (via the backend, which owns location) ----------
+  //
+  // This used to resolve location in the browser and, whenever geolocation
+  // failed for any reason, fall back to hardcoded coordinates for New York
+  // while displaying a real temperature labelled "New York, NY". A user in
+  // Seattle saw a confident, specific, wrong answer with nothing marking it
+  // as a guess. It also sent precise coordinates to api.bigdatacloud.net,
+  // a third party documented nowhere in the project.
+  //
+  // Now the browser's only job is to offer a position when the user has
+  // granted permission. Deciding *where the user is* belongs to one place,
+  // the backend's LocationResolver, which refuses to guess.
 
-  async function loadWeather(lat, lon, place) {
-    try {
-      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
-        `&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code` +
-        `&temperature_unit=fahrenheit`;
-      const res = await fetch(url);
-      const data = await res.json();
-      const cur = data.current;
-      document.getElementById("weather-temp").innerHTML = `${cur.temperature_2m.toFixed(1)}&deg;F`;
-      document.getElementById("weather-place").textContent = place;
-      document.getElementById("weather-desc").textContent = WEATHER_CODES[cur.weather_code] || "—";
-      document.getElementById("weather-humidity").textContent = `${cur.relative_humidity_2m}%`;
-      document.getElementById("weather-wind").textContent = `${cur.wind_speed_10m.toFixed(1)} m/s`;
-    } catch (_err) {
-      document.getElementById("weather-place").textContent = "Weather unavailable";
-    }
+  function renderWeatherUnavailable(message) {
+    document.getElementById("weather-place").textContent = message;
+    document.getElementById("weather-temp").innerHTML = "--&deg;";
+    document.getElementById("weather-desc").textContent = "—";
+    document.getElementById("weather-humidity").textContent = "--%";
+    document.getElementById("weather-wind").textContent = "--";
   }
 
-  async function resolvePlaceName(lat, lon) {
+  async function loadWeather() {
+    let res;
     try {
-      const res = await fetch(
-        `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=en`
-      );
-      const data = await res.json();
-      return data.city || data.locality || data.countryName || "Current location";
+      res = await api("/v1/weather");
     } catch (_err) {
-      return "Current location";
+      renderWeatherUnavailable("Weather unavailable");
+      return;
     }
+    if (res.status === 409) {
+      // No location configured. Say so plainly instead of inventing one.
+      renderWeatherUnavailable("Set a location");
+      return;
+    }
+    if (!res.ok) {
+      renderWeatherUnavailable("Weather unavailable");
+      return;
+    }
+    const data = await res.json();
+    const temp = data.temperature;
+    document.getElementById("weather-temp").innerHTML =
+      temp === null || temp === undefined
+        ? "--&deg;"
+        : `${temp.toFixed(1)}&deg;${data.temperature_unit}`;
+    // The provenance string says whether this is a device fix, a saved
+    // default or an explicit request, so a wrong default is visible at a
+    // glance rather than after acting on it.
+    document.getElementById("weather-place").textContent = data.location.label;
+    document.getElementById("weather-place").title = data.location.provenance;
+    let desc = data.condition || "—";
+    if (data.from_cache && data.cache_age_seconds > 60) {
+      desc += ` (cached ${Math.round(data.cache_age_seconds / 60)}m ago)`;
+    }
+    if (data.location.is_stale) desc += " (location fix is over an hour old)";
+    document.getElementById("weather-desc").textContent = desc;
+    document.getElementById("weather-humidity").textContent =
+      data.humidity_percent === null || data.humidity_percent === undefined
+        ? "--%"
+        : `${Math.round(data.humidity_percent)}%`;
+    document.getElementById("weather-wind").textContent =
+      data.wind_speed === null || data.wind_speed === undefined
+        ? "--"
+        : `${data.wind_speed.toFixed(1)} ${data.wind_unit}`;
   }
 
   function initWeather() {
-    const fallback = { lat: 40.7128, lon: -74.006, place: "New York, NY" };
-    if (!navigator.geolocation) {
-      loadWeather(fallback.lat, fallback.lon, fallback.place);
-      return;
+    // Offer a device position only if the browser can provide one. A refusal
+    // or a timeout is not an error state: the backend falls back to the
+    // user's saved default, or asks for a city.
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+          try {
+            await api("/v1/location/device-fix", {
+              method: "POST",
+              body: JSON.stringify({
+                latitude: pos.coords.latitude,
+                longitude: pos.coords.longitude,
+                accuracy_metres: pos.coords.accuracy,
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "",
+              }),
+            });
+          } catch (_err) {
+            // Backend unreachable; the saved default still applies.
+          }
+          loadWeather();
+        },
+        () => loadWeather(),
+        { timeout: 5000 }
+      );
+    } else {
+      loadWeather();
     }
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const { latitude, longitude } = pos.coords;
-        const place = await resolvePlaceName(latitude, longitude);
-        loadWeather(latitude, longitude, place);
-      },
-      () => loadWeather(fallback.lat, fallback.lon, fallback.place),
-      { timeout: 5000 }
-    );
+    // Refresh periodically; the backend caches, so this is cheap.
+    setInterval(loadWeather, 10 * 60 * 1000);
   }
 
   initWeather();
@@ -367,28 +488,6 @@
   // execution in app/api/tools.py. This is a single-user local app sharing
   // one bearer token, so "granted" here just means "this desktop UI
   // exposes this integration," not a separate per-feature consent record.
-  const AVAILABLE_TOOLS = [
-    "get_current_time",
-    "delete_memory",
-    "delete_all_memories",
-    "get_pc_status",
-    "control_home_device",
-    "open_website",
-    "close_website",
-    "launch_app",
-    "focus_app",
-    "close_app",
-    "list_open_windows",
-    "take_screenshot",
-    "list_files",
-    "read_file",
-    "write_file",
-    "append_file",
-    "create_folder",
-    "move_file",
-    "delete_file",
-  ];
-  const GRANTED_PERMISSIONS = ["pc_agent", "smart_home", "os_control", "screen_capture", "file_access"];
 
   // Sites open_website can actually type a search query into (see
   // app/services/browser_automation.py's SEARCHABLE_SITES) — used here only
@@ -407,7 +506,7 @@
   // separate /v1/memories store.
   const HISTORY_KEY = "jarvis.conversation.v1";
   const MAX_STORED_TURNS = 200;
-  const MAX_CONTEXT_TURNS = 8;
+
 
   function loadHistory() {
     try {
@@ -546,6 +645,11 @@
   }
 
   function setSpeaking(isSpeaking) {
+    // The one place the assistant's speaking state changes, so the one
+    // place the self-transcription gate needs to be driven from. Both the
+    // real-audio and browser-TTS paths route through here.
+    if (isSpeaking) speechGate.beginPlayback();
+    else speechGate.endPlayback(performance.now());
     orbEl.classList.toggle("speaking", isSpeaking);
     if (!isSpeaking) orbEl.classList.remove("tick");
     statusEl.textContent = isSpeaking ? "Speaking…" : idleStatusText();
@@ -648,13 +752,73 @@
 
   async function ensureSession() {
     try {
-      await api("/v1/session", {
-        method: "POST",
-        body: JSON.stringify({ device_id: "desktop-dashboard", client_version: "0.1.0" }),
-      });
+      const res = await api("/v2/capabilities");
+      if (!res.ok) throw new Error("Session expired. Reopen the native app or pair again.");
+      const capabilities = await res.json();
+      capabilitySummary.textContent = capabilities.map(c => c.description).join(" ");
+      statusEl.textContent = "Connected";
+      await refreshConversations();
     } catch (_err) {
-      // Non-fatal — /v1/reason doesn't actually depend on the session_id today.
+      statusEl.textContent = "Open the native app or pair this device";
     }
+  }
+
+  async function performAction(proposal, messageDiv) {
+    const actionId = proposal.action_id;
+    activeActionId = actionId;
+    let settled = false;
+    let expiryTimer = null;
+    const row = document.createElement("div");
+    async function resolve(accepted) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(expiryTimer);
+      row.remove();
+      clearPendingVoiceConfirmation();
+      try {
+        if (!accepted) {
+          await api(`/v1/actions/${actionId}/cancel`, { method: "POST" });
+          await speak("Cancelled.");
+          return;
+        }
+        if (proposal.decision === "require_confirmation") {
+          const approved = await api(`/v1/actions/${actionId}/approve`, {
+            method: "POST", headers: { "X-Jarvis-Approval-Key": credentials.approval_key },
+          });
+          if (!approved.ok) throw new Error("Approval expired or unavailable. Ask again.");
+        }
+        const response = await api("/v1/tools/execute", {
+          method: "POST", body: JSON.stringify({ action_id: actionId }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || "Action unavailable");
+        addMessage(result.success ? "assistant" : "error", result.output);
+        await speak(result.output);
+      } catch (error) {
+        addMessage("error", error.message);
+      } finally {
+        if (activeActionId === actionId) activeActionId = "";
+      }
+    }
+    if (proposal.decision === "allow") return resolve(true);
+    row.className = "confirm-row";
+    const summary = document.createElement("span");
+    summary.textContent = proposal.confirmation_summary || "Approve this action?";
+    const yes = document.createElement("button");
+    yes.className = "accept";
+    yes.textContent = "Confirm";
+    yes.onclick = () => resolve(true);
+    const no = document.createElement("button");
+    no.className = "reject";
+    no.textContent = "Cancel";
+    no.onclick = () => resolve(false);
+    row.append(summary, yes, no);
+    messageDiv.appendChild(row);
+    setChatCollapsed(false);
+    chatEl.scrollTop = chatEl.scrollHeight;
+    await speak(summary.textContent + " Say confirm or cancel.");
+    setPendingVoiceConfirmation(resolve);
+    expiryTimer = setTimeout(() => resolve(false), 120000);
   }
 
   // `spokenAnswer` is the model's own pre-execution announcement (e.g.
@@ -670,11 +834,17 @@
       body: JSON.stringify({
         tool_name: call.tool_name,
         target: call.target,
+        content: call.content || "",
         arguments: call.arguments || {},
-        granted_permissions: GRANTED_PERMISSIONS,
       }),
     });
     const proposal = await proposeRes.json();
+
+    if (!proposeRes.ok) {
+      addMessage("error", proposal.detail || "Action unavailable");
+      return;
+    }
+    if (proposal.action_id) return performAction(proposal, messageDiv);
 
     if (proposal.decision === "deny") {
       if (spokenAnswer) await speak(spokenAnswer);
@@ -682,75 +852,6 @@
       return;
     }
 
-    const runExecute = async (confirmed, { speakResult } = {}) => {
-      const execRes = await api("/v1/tools/execute", {
-        method: "POST",
-        body: JSON.stringify({
-          tool_name: call.tool_name,
-          target: call.target,
-          // Body text for write_file/append_file; empty for everything else.
-          content: call.content || "",
-          arguments: call.arguments || {},
-          confirmed,
-          granted_permissions: GRANTED_PERMISSIONS,
-        }),
-      });
-      const result = await execRes.json();
-      const output = result.output || (execRes.ok ? "Done." : "Failed.");
-      addMessage(result.success ? "assistant" : "error", output);
-      // Nothing else announces completion out loud for a confirmed action
-      // (the pre-execution line already covered the immediate/no-confirm
-      // path) — without this, saying "yes" produces total silence.
-      if (speakResult) await speak(output);
-      // Opening/searching/closing sites is real server-side browser
-      // automation now (see app/services/browser_automation.py) — no
-      // window.open() or popup-blocker workaround needed here anymore. If
-      // a searchable site was opened with no query yet, arm the follow-up
-      // so the very next thing said becomes the search terms directly,
-      // without needing to say "Jarvis" again or round-trip the model.
-      if (result.success && call.tool_name === "open_website") {
-        const [siteKey, ...rest] = (call.target || "").trim().toLowerCase().split(/\s+/);
-        if (!rest.length && SEARCHABLE_SITE_KEYS.includes(siteKey)) {
-          armPendingSearchSite(siteKey);
-        }
-      }
-    };
-
-    const needsConfirmation = proposal.decision !== "allow" || requiresConfirmation;
-
-    if (!needsConfirmation) {
-      if (spokenAnswer) await speak(spokenAnswer);
-      await runExecute(false);
-      return;
-    }
-
-    await speak(spokenAnswer ? `${spokenAnswer} Should I go ahead?` : "Should I go ahead?");
-
-    const row = document.createElement("div");
-    row.className = "confirm-row";
-    row.innerHTML =
-      `<span>${proposal.confirmation_summary || `Run "${call.tool_name}"?`}</span>`;
-    const accept = document.createElement("button");
-    accept.className = "accept";
-    accept.textContent = "Confirm";
-    const reject = document.createElement("button");
-    reject.className = "reject";
-    reject.textContent = "Cancel";
-    // A click isn't the only valid way to answer this — see
-    // pendingVoiceConfirmation below, resolved by the wake-word recognizer
-    // hearing "yes"/"no". Without that, a voice-only interaction has no way
-    // to ever answer a confirmation prompt it can't see or click.
-    const resolveConfirmation = async (confirmed) => {
-      row.remove();
-      clearPendingVoiceConfirmation();
-      if (confirmed) await runExecute(true, { speakResult: true });
-    };
-    accept.onclick = () => resolveConfirmation(true);
-    reject.onclick = () => resolveConfirmation(false);
-    row.appendChild(accept);
-    row.appendChild(reject);
-    messageDiv.appendChild(row);
-    setPendingVoiceConfirmation(resolveConfirmation);
   }
 
   // Answers an armed pendingSearchSite directly against open_website,
@@ -781,7 +882,8 @@
     statusEl.textContent = "Shutting down…";
     await speak("Shutting down. Goodbye, sir.");
     try {
-      await api("/v1/system/terminate", { method: "POST" });
+      await api("/v1/system/terminate", { method: "POST",
+        headers: { "X-Jarvis-Approval-Key": credentials.approval_key } });
     } catch (_err) {
       // The process is exiting either way — a fetch failure here (the
       // connection resetting mid-request as the server dies) isn't
@@ -790,20 +892,20 @@
   }
 
   async function sendMessage(question) {
+    const epoch = ++turnEpoch;
+    if (activeActionId) {
+      await api(`/v1/actions/${activeActionId}/cancel`, { method: "POST" });
+      activeActionId = "";
+      clearPendingVoiceConfirmation();
+    }
     addMessage("user", question);
     conversationHistory.push({ role: "user", text: question });
     saveHistory();
     setThinking(true);
     try {
-      const priorTurns = conversationHistory.slice(0, -1).slice(-MAX_CONTEXT_TURNS * 2);
-      const context = priorTurns.map((turn) => ({
-        source: "CONVERSATION_HISTORY",
-        label: turn.role === "user" ? "You said earlier in this conversation" : "JARVIS said earlier in this conversation",
-        content: turn.text,
-      }));
-      const res = await api("/v1/reason", {
+      const res = await api("/v2/turns", {
         method: "POST",
-        body: JSON.stringify({ context, question, available_tools: AVAILABLE_TOOLS }),
+        body: JSON.stringify({ conversation_id: conversationId, turn_id: crypto.randomUUID(), question }),
       });
       if (!res.ok) {
         const detail = await res.json().catch(() => ({}));
@@ -812,15 +914,21 @@
         return;
       }
       const result = await res.json();
+      if (epoch !== turnEpoch) {
+        if (result.action_id) await api(`/v1/actions/${result.action_id}/cancel`, { method: "POST" });
+        return;
+      }
+      conversationId = result.conversation_id;
+      JarvisContract.validateTurn(result);
       const messageDiv = addMessage("assistant", result.spoken_answer);
       conversationHistory.push({ role: "assistant", text: result.spoken_answer });
       saveHistory();
       setThinking(false);
-      if (result.proposed_tool_call) {
+      if (result.action_id) {
         // handleToolCall decides what to actually speak — it may need to
         // say "Should I go ahead?" instead of this verbatim, depending on
         // whether confirmation turns out to be required (see there).
-        await handleToolCall(result.proposed_tool_call, result.requires_confirmation, messageDiv, result.spoken_answer);
+        await performAction(result, messageDiv);
       } else {
         await speak(result.spoken_answer);
       }
@@ -855,6 +963,109 @@
   // recording.
   const micBtn = document.getElementById("mic-btn");
   const wakeToggleBtn = document.getElementById("wake-toggle");
+
+  // ---- Microphone device picker -------------------------------------------
+  //
+  // Browsers withhold device *labels* until microphone permission has been
+  // granted: before that, enumerateDevices() returns entries with empty
+  // labels (and often a single blank-id entry). So this list cannot be
+  // populated usefully on first load, and the hint says why instead of
+  // showing an empty dropdown that looks broken.
+  //
+  // The saved choice is applied as `deviceId: {ideal}` by
+  // JarvisVoice.audioConstraints -- never `{exact}`, which would make voice
+  // fail permanently the first time that microphone is unplugged rather than
+  // quietly falling back to the default.
+  const micSelect = document.getElementById("mic-device");
+  const micHint = document.getElementById("mic-hint");
+
+  if (micSelect && micHint && navigator.mediaDevices) {
+    const DEFAULT_LABEL = "System default";
+
+    function describeSelection(deviceId, devices) {
+      if (!deviceId) return "Using the system default device.";
+      const match = devices.find((d) => d.deviceId === deviceId);
+      if (match) return "Saved for next time.";
+      // The saved device is not currently present. Say so plainly: the app
+      // still works (it falls back to the default), but silently ignoring a
+      // saved preference is the kind of thing that makes a microphone bug
+      // impossible to diagnose.
+      return "Saved device not connected — using the system default.";
+    }
+
+    async function refreshMicDevices() {
+      let devices = [];
+      try {
+        devices = JarvisVoice.usableInputDevices(
+          await navigator.mediaDevices.enumerateDevices()
+        );
+      } catch (_err) {
+        micHint.textContent = "Could not list audio devices in this browser.";
+        return;
+      }
+
+      const saved = JarvisVoice.loadSavedDeviceId(window.localStorage);
+
+      if (!devices.length) {
+        micSelect.innerHTML = "";
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = DEFAULT_LABEL;
+        micSelect.appendChild(option);
+        micHint.textContent =
+          "Allow microphone access once to choose a specific device.";
+        return;
+      }
+
+      micSelect.innerHTML = "";
+      const fallback = document.createElement("option");
+      fallback.value = "";
+      fallback.textContent = DEFAULT_LABEL;
+      micSelect.appendChild(fallback);
+
+      devices.forEach((device) => {
+        const option = document.createElement("option");
+        option.value = device.deviceId;
+        option.textContent = device.label;
+        micSelect.appendChild(option);
+      });
+
+      // Keep the saved value selected even when that device is absent, so the
+      // preference is not silently discarded by a repopulate.
+      micSelect.value = devices.some((d) => d.deviceId === saved) ? saved : "";
+      micHint.textContent = describeSelection(saved, devices);
+    }
+
+    micSelect.addEventListener("change", async () => {
+      const chosen = micSelect.value;
+      const stored = JarvisVoice.saveDeviceId(window.localStorage, chosen);
+      let devices = [];
+      try {
+        devices = JarvisVoice.usableInputDevices(
+          await navigator.mediaDevices.enumerateDevices()
+        );
+      } catch (_err) {
+        devices = [];
+      }
+      if (!stored) {
+        // Private mode or blocked site data: the choice applies to this
+        // session but will not survive a reload. Better to say so than to
+        // let the user believe it was remembered.
+        micHint.textContent = "Applied, but this browser won't remember it.";
+        return;
+      }
+      micHint.textContent = describeSelection(chosen, devices);
+    });
+
+    // Labels appear once permission is granted, and the list changes when a
+    // headset is plugged in or removed.
+    if (navigator.mediaDevices.addEventListener) {
+      navigator.mediaDevices.addEventListener("devicechange", refreshMicDevices);
+    }
+    window.addEventListener("jarvis-mic-permission-granted", refreshMicDevices);
+
+    refreshMicDevices();
+  }
   const browserSpeechImpl = window.SpeechRecognition || window.webkitSpeechRecognition;
   const usingLocalStt = STT_PROVIDER === "local";
   const SpeechRecognitionImpl = usingLocalStt ? LocalSpeechRecognition : browserSpeechImpl;
@@ -915,7 +1126,11 @@
     pushToTalk.addEventListener("error", (event) => {
       setPushToTalkActive(false);
       if (event.error !== "aborted" && event.error !== "no-speech") {
-        addMessage("error", `Microphone error: ${event.error}`);
+        // Prefer the classified, actionable message over the raw code:
+        // "no-device" and "not-allowed" need completely different fixes.
+        const known = JarvisVoice.MIC_ERRORS[event.error];
+        addMessage("error", event.detail || (known && known.message) ||
+          `Microphone error: ${event.error}`);
       }
     });
 
@@ -1063,7 +1278,7 @@
 
           if (isStopPhrase(transcript)) {
             console.info("[JARVIS] stop phrase heard, ending conversation:", transcript);
-            stopSpeaking();
+            cancelCurrentTurn();
             setAwaitingCommand(false);
             clearPendingSearchSite();
             return;
@@ -1118,6 +1333,15 @@
 
       rec.addEventListener("error", (event) => {
         console.warn("[JARVIS] wake word recognition error:", event.error);
+        if (event.error === "no-device") {
+          addMessage("error", JarvisVoice.MIC_ERRORS["no-device"].message +
+            " Wake word mode needs a microphone.");
+          return;
+        }
+        if (event.error === "device-busy") {
+          addMessage("error", JarvisVoice.MIC_ERRORS["device-busy"].message);
+          return;
+        }
         if (event.error === "not-allowed" || event.error === "service-not-allowed") {
           addMessage("error", "Microphone access was denied — wake word mode needs it. Check the site's microphone permission (the icon in the address bar) and try again.");
           setWakeMode(false);
@@ -1199,5 +1423,100 @@
     wakeToggleBtn.addEventListener("click", () => setWakeMode(!wakeModeEnabled));
   }
 
-  ensureSession();
+  // No public-page credentials. The host supplies a short-lived session,
+  // or this page explicitly enrolls with a one-time code from that host.
+  const connection = document.createElement("section");
+  const capabilitySummary = document.createElement("p");
+  capabilitySummary.textContent = "Connect to discover available capabilities.";
+  connection.className = "card runtime-connection";
+  connection.setAttribute("aria-label", "Device connection and conversations");
+  const codeInput = document.createElement("input");
+  codeInput.type = "password";
+  codeInput.placeholder = "One-time pairing code";
+  codeInput.autocomplete = "off";
+  const pairButton = document.createElement("button");
+  pairButton.textContent = "Pair this device";
+  pairButton.onclick = async () => {
+    const response = await fetch("/v2/devices/enroll", { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: codeInput.value, name: "Browser" }) });
+    codeInput.value = "";
+    if (!response.ok) return addMessage("error", "Pairing failed or expired.");
+    await window.jarvisBootstrap(await response.json());
+  };
+  const inviteButton = document.createElement("button");
+  inviteButton.textContent = "Create phone pairing code";
+  const pairingOutput = document.createElement("output");
+  inviteButton.onclick = async () => {
+    try {
+      const response = await api("/v2/devices/invitations", { method: "POST",
+        headers: { "X-Jarvis-Approval-Key": credentials.approval_key },
+        body: JSON.stringify({ grants: ["pc_agent", "os_control"] }) });
+      const data = await response.json();
+      pairingOutput.textContent = response.ok ? data.code : (data.detail || "Pairing unavailable");
+      setTimeout(() => { pairingOutput.textContent = ""; }, 120000);
+    } catch (error) { addMessage("error", error.message); }
+  };
+  const conversationSelect = document.createElement("select");
+  conversationSelect.setAttribute("aria-label", "Shared conversation");
+  async function refreshConversations() {
+    const response = await api("/v2/conversations");
+    if (!response.ok) return;
+    const data = await response.json();
+    conversationSelect.replaceChildren(new Option("New conversation", ""));
+    for (const c of data.conversations) conversationSelect.add(new Option(c.id, c.id));
+    conversationSelect.value = conversationId;
+  }
+  conversationSelect.onchange = async () => {
+    if (activeActionId) await api(`/v1/actions/${activeActionId}/cancel`, { method: "POST" });
+    clearPendingVoiceConfirmation();
+    activeActionId = "";
+    conversationId = conversationSelect.value;
+    chatEl.replaceChildren();
+    if (!conversationId) return;
+    const response = await api(`/v2/conversations/${conversationId}`);
+    if (!response.ok) return;
+    for (const turn of (await response.json()).turns) {
+      addMessage("user", turn.question);
+      if (turn.state === "completed") addMessage("assistant", JSON.parse(turn.response).spoken_answer);
+    }
+  };
+  const refresh = document.createElement("button");
+  refresh.textContent = "Refresh conversations";
+  refresh.onclick = refreshConversations;
+  const deviceList = document.createElement("div");
+  const devicesButton = document.createElement("button");
+  devicesButton.textContent = "Manage paired devices";
+  devicesButton.onclick = async () => {
+    const response = await api("/v2/devices");
+    if (!response.ok) return;
+    deviceList.replaceChildren();
+    for (const d of (await response.json()).devices) {
+      const button = document.createElement("button");
+      button.textContent = `${d.name}: ${d.revoked ? "revoked" : "revoke"}`;
+      button.disabled = Boolean(d.revoked);
+      button.onclick = async () => {
+        const result = await api(`/v2/devices/${d.id}`, { method: "DELETE",
+          headers: { "X-Jarvis-Approval-Key": credentials.approval_key } });
+        if (result.ok) { button.disabled = true; button.textContent = `${d.name}: revoked`; }
+      };
+      deviceList.appendChild(button);
+    }
+  };
+  const logoutButton = document.createElement("button");
+  const stopButton = document.createElement("button");
+  stopButton.textContent = "Stop current action";
+  stopButton.onclick = cancelCurrentTurn;
+  logoutButton.textContent = "Disconnect session";
+  logoutButton.onclick = async () => {
+    await api("/v2/logout", { method: "POST" });
+    credentials = null;
+    clearPendingVoiceConfirmation();
+    activeActionId = "";
+    stopSpeaking();
+    statusEl.textContent = "Disconnected";
+  };
+  connection.append(capabilitySummary, codeInput, pairButton, inviteButton, pairingOutput, conversationSelect,
+    refresh, devicesButton, deviceList, stopButton, logoutButton);
+  document.querySelector(".rail").prepend(connection);
 })();

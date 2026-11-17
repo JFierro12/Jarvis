@@ -1,0 +1,226 @@
+{
+  "contract_version": "2",
+  "models": {
+    "Capability": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "required_permissions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Required Permissions",
+          "type": "array"
+        },
+        "requires_confirmation": {
+          "title": "Requires Confirmation",
+          "type": "boolean"
+        },
+        "risk_level": {
+          "title": "Risk Level",
+          "type": "string"
+        },
+        "target_device": {
+          "title": "Target Device",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "risk_level",
+        "requires_confirmation",
+        "required_permissions",
+        "target_device"
+      ],
+      "title": "Capability",
+      "type": "object"
+    },
+    "Enrollment": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "maxLength": 128,
+          "minLength": 20,
+          "title": "Code",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "name"
+      ],
+      "title": "Enrollment",
+      "type": "object"
+    },
+    "Invitation": {
+      "additionalProperties": false,
+      "properties": {
+        "grants": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Grants",
+          "type": "array"
+        }
+      },
+      "title": "Invitation",
+      "type": "object"
+    },
+    "SessionCredentials": {
+      "additionalProperties": false,
+      "properties": {
+        "access_token": {
+          "title": "Access Token",
+          "type": "string"
+        },
+        "approval_key": {
+          "title": "Approval Key",
+          "type": "string"
+        },
+        "contract_version": {
+          "const": "2",
+          "default": "2",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "device_id": {
+          "title": "Device Id",
+          "type": "string"
+        },
+        "expires_in_seconds": {
+          "title": "Expires In Seconds",
+          "type": "integer"
+        },
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "access_token",
+        "approval_key",
+        "session_id",
+        "device_id",
+        "expires_in_seconds"
+      ],
+      "title": "SessionCredentials",
+      "type": "object"
+    },
+    "TurnRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "conversation_id": {
+          "default": "",
+          "maxLength": 128,
+          "title": "Conversation Id",
+          "type": "string"
+        },
+        "question": {
+          "maxLength": 16000,
+          "minLength": 1,
+          "title": "Question",
+          "type": "string"
+        },
+        "target_device": {
+          "default": "desktop",
+          "maxLength": 128,
+          "title": "Target Device",
+          "type": "string"
+        },
+        "turn_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Turn Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "turn_id",
+        "question"
+      ],
+      "title": "TurnRequest",
+      "type": "object"
+    },
+    "TurnResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "default": "",
+          "title": "Action Id",
+          "type": "string"
+        },
+        "confirmation_summary": {
+          "default": "",
+          "title": "Confirmation Summary",
+          "type": "string"
+        },
+        "contract_version": {
+          "const": "2",
+          "default": "2",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "conversation_id": {
+          "title": "Conversation Id",
+          "type": "string"
+        },
+        "decision": {
+          "enum": [
+            "answer",
+            "allow",
+            "require_confirmation",
+            "deny"
+          ],
+          "title": "Decision",
+          "type": "string"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "prompt_version": {
+          "title": "Prompt Version",
+          "type": "string"
+        },
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "spoken_answer": {
+          "title": "Spoken Answer",
+          "type": "string"
+        },
+        "turn_id": {
+          "title": "Turn Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "conversation_id",
+        "turn_id",
+        "spoken_answer",
+        "decision",
+        "provider",
+        "model",
+        "prompt_version"
+      ],
+      "title": "TurnResponse",
+      "type": "object"
+    }
+  }
+}

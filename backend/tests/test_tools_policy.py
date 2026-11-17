@@ -32,10 +32,11 @@ def test_missing_permission_denied(client):
     assert "pc_agent" in body["reason"]
 
 
-def test_granted_permission_allows_read_only_pc_status(client):
-    response = client.post(
+def test_granted_permission_allows_read_only_pc_status(granted_client):
+    # The grant now comes from server-side configuration, not the request.
+    response = granted_client.post(
         "/v1/tools/propose",
-        json={"tool_name": "get_pc_status", "granted_permissions": ["pc_agent"]},
+        json={"tool_name": "get_pc_status"},
         headers=AUTH_HEADERS,
     )
     assert response.json()["decision"] == "allow"

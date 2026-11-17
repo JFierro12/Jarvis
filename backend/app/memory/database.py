@@ -1,7 +1,7 @@
+from fastapi import Request
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.core.config import get_settings
 from app.memory.models import Base
 
 
@@ -10,16 +10,12 @@ def make_engine(database_url: str):
     return create_engine(database_url, connect_args=connect_args)
 
 
-_engine = make_engine(get_settings().database_url)
-SessionLocal = sessionmaker(bind=_engine, autoflush=False, autocommit=False)
+def init_db(engine) -> None:
+    Base.metadata.create_all(engine)
 
 
-def init_db(engine=None) -> None:
-    Base.metadata.create_all(engine or _engine)
-
-
-def get_db_session():
-    db = SessionLocal()
+def get_db_session(request: Request):
+    db = sessionmaker(bind=request.app.state.database_engine, autoflush=False, autocommit=False)()
     try:
         yield db
     finally:

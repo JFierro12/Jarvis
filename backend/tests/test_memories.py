@@ -1,4 +1,4 @@
-from tests.conftest import AUTH_HEADERS
+from tests.conftest import APPROVAL_HEADERS, AUTH_HEADERS
 
 
 def _create(client, title="keys", summary="Keys on the kitchen counter"):
@@ -12,6 +12,20 @@ def _create(client, title="keys", summary="Keys on the kitchen counter"):
         },
         headers=AUTH_HEADERS,
     )
+
+
+
+
+def _approved_delete(client, memory_id: str) -> str:
+    """Run the real lifecycle: propose, then approve via the separate
+    approval credential, and return the action id to execute."""
+    action_id = client.post(
+        "/v1/tools/propose",
+        json={"tool_name": "delete_memory", "target": memory_id},
+        headers=AUTH_HEADERS,
+    ).json()["action_id"]
+    client.post(f"/v1/actions/{action_id}/approve", headers=APPROVAL_HEADERS)
+    return action_id
 
 
 def test_create_memory(client):
@@ -55,12 +69,12 @@ def test_delete_is_idempotent_via_tool_execute(client):
     created = _create(client).json()
     first = client.post(
         "/v1/tools/execute",
-        json={"tool_name": "delete_memory", "target": created["id"], "confirmed": True},
+        json={"tool_name": "delete_memory", "target": created["id"], "action_id": _approved_delete(client, created["id"])},
         headers=AUTH_HEADERS,
     )
     second = client.post(
         "/v1/tools/execute",
-        json={"tool_name": "delete_memory", "target": created["id"], "confirmed": True},
+        json={"tool_name": "delete_memory", "target": created["id"], "action_id": _approved_delete(client, created["id"])},
         headers=AUTH_HEADERS,
     )
     assert first.status_code == 200

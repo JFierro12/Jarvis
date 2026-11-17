@@ -18,7 +18,7 @@ from app.models.schemas import (
 from app.services.anthropic_reasoning import LanguageReasoningUnavailableError
 from app.services.elevenlabs_speech import SpeechSynthesisUnavailableError
 from app.services.local_speech import LocalTranscriptionError, get_local_transcriber
-from app.services.reasoning import get_reasoning_provider
+from app.services.reasoning import UnknownContextSourceError, get_reasoning_provider, validate_context_sources
 from app.services.speech import get_speech_provider, mock_transcribe
 from app.services.vision import VisionUnavailableError, get_vision_provider
 
@@ -33,6 +33,8 @@ async def transcribe(
     settings: Settings = Depends(get_settings),
 ) -> TranscribeResponse:
     if settings.stt_provider != "local":
+        if settings.live_mode:
+            raise HTTPException(status_code=503, detail="Configure a real transcription provider")
         text = mock_transcribe(payload.audio_base64)
         if not text:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid audio payload")
@@ -64,14 +66,22 @@ def reason(
     _token: str = Depends(require_bearer_token),
     settings: Settings = Depends(get_settings),
 ) -> ReasonResponse:
+    # Reject unrecognized provenance rather than letting an unknown label
+    # slip past the untrusted-source handling.
+    try:
+        validate_context_sources(payload.context)
+    except UnknownContextSourceError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
     provider = get_reasoning_provider(settings.reasoning_provider)
+    if settings.live_mode and settings.reasoning_provider not in {"local", "anthropic"}:
+        raise HTTPException(status_code=503, detail="Configure a real reasoning provider")
     logger.info(
-        "reason() provider=%s question=%r available_tools=%r context_items=%d",
-        type(provider).__name__, payload.question, payload.available_tools, len(payload.context),
+        "reason() provider=%s context_items=%d",
+        type(provider).__name__, len(payload.context),
     )
     try:
         result = provider.reason(payload.context, payload.question, payload.available_tools)
-        logger.info("reason() -> spoken_answer=%r proposed_tool_call=%r", result.spoken_answer, result.proposed_tool_call)
         return result
     except LanguageReasoningUnavailableError as exc:
         logger.info("reason() -> unavailable: %s", exc)
@@ -85,6 +95,8 @@ def analyze_vision(
     settings: Settings = Depends(get_settings),
 ) -> VisionAnalyzeResponse:
     provider = get_vision_provider(settings.vision_provider)
+    if settings.live_mode and settings.vision_provider == "mock":
+        raise HTTPException(status_code=503, detail="Vision is not configured")
     try:
         return provider.analyze(payload.image_base64, payload.question)
     except VisionUnavailableError as exc:
@@ -100,6 +112,8 @@ def synthesize_speech(
     if not payload.text.strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="text must not be empty")
     provider = get_speech_provider(settings.tts_provider)
+    if settings.live_mode and settings.tts_provider == "mock":
+        raise HTTPException(status_code=503, detail="Use device speech or configure a real speech provider")
     try:
         audio = provider.synthesize(payload.text, payload.voice_id)
     except SpeechSynthesisUnavailableError as exc:
