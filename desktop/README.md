@@ -177,6 +177,81 @@ request — are logged to `jarvis.log` next to the .exe instead. Check there
 first if something that worked in `uvicorn app.main:app` dev mode doesn't
 work in the packaged build.
 
+## Leaving the window open for days
+
+Two failures only show up after hours of uptime, and both were diagnosed
+on a window that had been open for 31 hours. They look like one symptom to
+a user — "it timed out and went white" — but they are unrelated.
+
+**The session expires after an hour.** `RuntimeStore._session` issues a
+3600-second session, and the page has no way to ask for another: the
+native host injects credentials through `run_js`, deliberately, so there
+is no refresh endpoint to call. Nothing renewed it, so after an hour every
+request 401s. The dashboard then freezes in place and says nothing, because
+`pollSystemStats` returns silently on a failed response — by design, since
+a single dropped poll is not worth surfacing. The observed instance had
+exactly one session row, expired 30 hours earlier, one hour after launch.
+
+`desktop_main.py` now renews from a watchdog thread at
+`SESSION_RENEWAL_FRACTION` of whatever lifetime the runtime issued, rather
+than restating the TTL. Credentials still only ever travel host -> page
+over `run_js`; this adds no HTTP route that hands out a secret.
+
+**The WebView2 renderer can die while the browser process lives.** The
+window then paints white forever. pywebview 6.2.1 surfaces no
+`ProcessFailed` event, so nothing notices and nothing reloads. On the
+observed instance the browser, GPU, crashpad and three utility processes
+were all still running with **no renderer process among them**; the backend
+was still serving `/` and `/health` normally the whole time. No crashpad
+dump was written, so the renderer was most likely terminated rather than
+faulting.
+
+Liveness is taken from the page's own traffic, via pywebview's
+`response_received` event — the dashboard polls `/v1/system/stats` every
+two seconds, so prolonged silence means the renderer is gone. A 401 counts
+as a sign of life: the question is whether JavaScript is still running, not
+whether it is authorised. Recovery is `window.load_url`, followed by a
+separate injection step on the next watchdog tick.
+
+**`window.load_url` does not re-fire the `loaded` event.** Measured on
+pywebview 6.2.1 / Windows with a bare window and no app involved: the
+handler runs once for the initial navigation and never again for a
+programmatic load of the same URL. The first version of this watchdog
+assumed otherwise and relied on `loaded` to re-inject the session, so a
+recovered page came back with no credentials and sat asking to be paired —
+an improvement on white, but not a fix. Hence the explicit `reinject`
+step, and `inject_session`'s retry from inside the page, since the new
+document can exist before `app.js` has defined `jarvisBootstrap`.
+
+One trap worth keeping in mind if this is ever reworked: silence alone is
+**not** sufficient grounds to reload. After *Disconnect session* the page
+stops making requests on purpose, and reloading it would re-inject a
+session the user had just dismissed. `page_watchdog_action` therefore
+requires a live session to exist before it will reload, and
+`tests/test_desktop_page_watchdog.py::test_disconnected_page_is_never_reloaded`
+pins that down.
+
+What is actually verified: renewal, end to end, by running the host with
+`SESSION_RENEWAL_FRACTION` lowered so renewal happens every few seconds --
+five consecutive renewals, each replacing the previous session row, which
+can only happen if the page was still being seen as alive *and* the
+re-injection landed. Separately, the reload branch was forced on a healthy
+page and re-injected the session as intended.
+
+The reload-and-reinject path was then re-run after the fix and does
+restore a session.
+
+What is *not* verified: the detection half. Confirming that a dead
+renderer is noticed requires ending the render process, which could not be
+done here. The chain it rests on is that `response_received` stops firing
+when no renderer exists -- sound, but untested against a real death.
+
+Also note that `evaluate_js` is *not* usable for this check. In pywebview
+6.2.1 the Windows backend waits on a semaphore with no timeout
+(`platforms/edgechromium.py`), and a dead renderer never fires the
+callback, so probing a white page that way hangs the probing thread
+permanently.
+
 ## What's not included yet
 
 Live camera/vision is not part of this build — the dashboard's camera

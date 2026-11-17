@@ -20,7 +20,8 @@ let package = Package(
         ),
         .testTarget(
             name: "JarvisKitTests",
-            dependencies: ["JarvisKit"]
+            dependencies: ["JarvisKit"],
+            resources: [.copy("Fixtures")]
         )
     ]
 )

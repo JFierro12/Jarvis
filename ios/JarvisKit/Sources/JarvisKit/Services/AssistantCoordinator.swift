@@ -34,6 +34,10 @@ public final class AssistantCoordinator: ObservableObject {
     private let handGestureController: HandGestureController
     private let musicPlayerController: MusicPlayerController
     private let acknowledgmentCuePlayer: AcknowledgmentCuePlayer
+    private let sharedRuntime: SharedAssistantRuntime?
+    private var pendingRemoteAction: String?
+    private var runtimeGeneration = 0
+    private var activeRemoteAction: String?
 
     /// True while waiting for the user's yes/no answer to "would you like
     /// directions on how to do so sir?" after starting browse mode.
@@ -67,7 +71,8 @@ public final class AssistantCoordinator: ObservableObject {
         voiceSettings: VoiceSettings = .default,
         handGestureController: HandGestureController = MockHandGestureController(),
         musicPlayerController: MusicPlayerController = MockMusicPlayerController(),
-        acknowledgmentCuePlayer: AcknowledgmentCuePlayer = MockAcknowledgmentCuePlayer()
+        acknowledgmentCuePlayer: AcknowledgmentCuePlayer = MockAcknowledgmentCuePlayer(),
+        sharedRuntime: SharedAssistantRuntime? = nil
     ) {
         self.wearableClient = wearableClient
         self.speechToText = speechToText
@@ -85,6 +90,7 @@ public final class AssistantCoordinator: ObservableObject {
         self.handGestureController = handGestureController
         self.musicPlayerController = musicPlayerController
         self.acknowledgmentCuePlayer = acknowledgmentCuePlayer
+        self.sharedRuntime = sharedRuntime
         self.stateMachine = AssistantStateMachine()
         observeWearableConnection()
         observeGestureControlState()
@@ -326,12 +332,16 @@ public final class AssistantCoordinator: ObservableObject {
             await resolveConfirmation(userSaidYes: intent.intent == .confirm)
             return mode == .foregroundWakeWord
         case .cancel:
+            if let action = pendingRemoteAction { try? await sharedRuntime?.cancel(actionId: action) }
+            pendingRemoteAction = nil
             await respond("Okay, sir.")
             move(to: .completed)
             stateMachine.reset()
             state = .idle
             return false
         case .endConversation:
+            if let action = pendingRemoteAction { try? await sharedRuntime?.cancel(actionId: action) }
+            pendingRemoteAction = nil
             await respond("You're welcome, sir.")
             move(to: .completed)
             stateMachine.reset()
@@ -401,6 +411,8 @@ public final class AssistantCoordinator: ObservableObject {
             state = .idle
             return mode == .foregroundWakeWord
         case .shutDown:
+            if let action = pendingRemoteAction { try? await sharedRuntime?.cancel(actionId: action) }
+            pendingRemoteAction = nil
             await handGestureController.stop()
             await disconnectWearable()
             // A full reset, unlike .cancel/.endConversation which
@@ -536,6 +548,46 @@ public final class AssistantCoordinator: ObservableObject {
         // reasoning provider, which may propose a tool call that policy must
         // separately authorize.
         move(to: .reasoning)
+        if let sharedRuntime {
+            runtimeGeneration += 1
+            let generation = runtimeGeneration
+            if let action = pendingRemoteAction { try? await sharedRuntime.cancel(actionId: action) }
+            pendingRemoteAction = nil
+            do {
+                let response = try await sharedRuntime.turn(question: transcript)
+                guard generation == runtimeGeneration else {
+                    if !response.actionId.isEmpty { try? await sharedRuntime.cancel(actionId: response.actionId) }
+                    return
+                }
+                if response.decision == "require_confirmation", !response.actionId.isEmpty {
+                    pendingRemoteAction = response.actionId
+                    move(to: .awaitingConfirmation(PendingAction(
+                        toolName: "shared_runtime", summary: response.confirmationSummary,
+                        target: response.actionId, riskLevel: .sensitiveWrite,
+                        expiresAt: Date().addingTimeInterval(120))))
+                    await respond(response.confirmationSummary + " Say confirm or cancel.")
+                } else if response.decision == "allow", !response.actionId.isEmpty {
+                    activeRemoteAction = response.actionId
+                    move(to: .executing(ActionDescriptor(toolName: "shared_runtime", summary: "Executing authorized action")))
+                    let result = try await sharedRuntime.execute(actionId: response.actionId)
+                    activeRemoteAction = nil
+                    guard generation == runtimeGeneration else { return }
+                    await respond(result.output)
+                } else {
+                    await respond(response.spokenAnswer)
+                }
+                move(to: .completed)
+            } catch {
+                move(to: .failed(UserFacingError(message: "Shared runtime unavailable.")))
+                stateMachine.reset()
+                state = .idle
+                lastResponse = "The shared runtime is unavailable. No action was retried."
+                await textToSpeech.speak(lastResponse, settings: voiceSettings)
+            }
+            stateMachine.reset()
+            state = .idle
+            return
+        }
         let context = contextAssembler.assemble(for: intent, transcript: transcript, visualDescription: visualDescription)
         do {
             let availableTools = policyEngine.availableToolNames(grantedPermissions: grantedPermissions)
@@ -601,6 +653,34 @@ public final class AssistantCoordinator: ObservableObject {
     }
 
     private func resolveConfirmation(userSaidYes: Bool) async {
+        if let action = pendingRemoteAction, let sharedRuntime {
+            let generation = runtimeGeneration
+            pendingRemoteAction = nil
+            do {
+                if userSaidYes {
+                    activeRemoteAction = action
+                    try await sharedRuntime.approve(actionId: action)
+                    guard generation == runtimeGeneration else {
+                        try? await sharedRuntime.cancel(actionId: action)
+                        return
+                    }
+                    move(to: .executing(ActionDescriptor(toolName: "shared_runtime", summary: "Executing approved action")))
+                    let result = try await sharedRuntime.execute(actionId: action)
+                    activeRemoteAction = nil
+                    await respond(result.output)
+                } else {
+                    try await sharedRuntime.cancel(actionId: action)
+                    await respond("Cancelled.")
+                }
+                move(to: .completed)
+            } catch {
+                lastResponse = "That approval expired or the device is unavailable. Ask again."
+                await textToSpeech.speak(lastResponse, settings: voiceSettings)
+            }
+            stateMachine.reset()
+            state = .idle
+            return
+        }
         guard let outcome = await confirmationManager.resolve(userSaidYes: userSaidYes) else {
             await respond("There's nothing pending to confirm, sir.")
             stateMachine.reset()
@@ -651,6 +731,14 @@ public final class AssistantCoordinator: ObservableObject {
     }
 
     public func stopEverything() async {
+        runtimeGeneration += 1
+        if let action = activeRemoteAction {
+            do { try await sharedRuntime?.cancel(actionId: action) }
+            catch { lastResponse = "The action has already started and may not be interruptible." }
+        }
+        activeRemoteAction = nil
+        if let action = pendingRemoteAction { try? await sharedRuntime?.cancel(actionId: action) }
+        pendingRemoteAction = nil
         speechToText.cancel()
         textToSpeech.stopSpeaking()
         await handGestureController.stop()

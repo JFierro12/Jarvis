@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 8765
     rate_limit_per_minute: int = 30
+    allowed_origins: str = ""
 
 
 @lru_cache

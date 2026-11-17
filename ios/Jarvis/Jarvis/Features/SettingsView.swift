@@ -12,13 +12,18 @@ struct SettingsView: View {
     @State private var tokenSaveConfirmation: String?
     @State private var pcAgentTokenText = ""
     @State private var pcAgentTokenSaveConfirmation: String?
+    @State private var enrollmentCode = ""
+    @State private var runtimeStatus = ""
+    @State private var sharedConversations: [RuntimeConversation] = []
+    @State private var runtimeCapabilities: [RuntimeCapability] = []
+    @AppStorage(AppEnvironment.conversationKey) private var conversationID = ""
 
     var body: some View {
         NavigationStack {
             List {
                 Section("Connection") {
                     Toggle("Live Mode", isOn: $liveModeEnabled)
-                    TextField("Backend URL (e.g. http://192.168.1.75:8000)", text: $backendURLString)
+                    TextField("Runtime URL (HTTPS required for pairing)", text: $backendURLString)
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -33,6 +38,43 @@ struct SettingsView: View {
                     Text("Live Mode uses your real glasses, on-device speech, and (if a backend URL is set) Claude for reasoning and vision. Changes here take effect the next time you fully quit and relaunch the app — not just background/foreground.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+                Section("Shared assistant") {
+                    SecureField("One-time code from PC", text: $enrollmentCode)
+                    Button("Pair with PC") {
+                        Task {
+                            guard let url = URL(string: backendURLString), url.scheme == "https" else {
+                                runtimeStatus = "Enter your private HTTPS runtime URL first."
+                                return
+                            }
+                            do {
+                                let credentials = try await AppEnvironment.runtimeClient(baseURL: url)
+                                    .enroll(code: enrollmentCode, name: "iPhone")
+                                try KeychainStore().set(credentials.accessToken, for: AppEnvironment.backendTokenKey)
+                                try KeychainStore().set(credentials.approvalKey, for: AppEnvironment.approvalTokenKey)
+                                enrollmentCode = ""
+                                conversationID = ""
+                                runtimeStatus = "Paired. Session lasts one hour. Relaunch after enabling Live Mode."
+                            } catch { runtimeStatus = "Pairing failed. Check HTTPS and request a fresh code on the PC." }
+                        }
+                    }
+                    Button("Refresh capabilities and conversations") {
+                        Task {
+                            guard let url = URL(string: backendURLString) else { return }
+                            do {
+                                let client = AppEnvironment.runtimeClient(baseURL: url)
+                                runtimeCapabilities = try await client.capabilities()
+                                sharedConversations = try await client.conversations()
+                                runtimeStatus = "Connected"
+                            } catch { runtimeStatus = "Runtime unavailable or session expired. Pair again." }
+                        }
+                    }
+                    Picker("Conversation", selection: $conversationID) {
+                        Text("New conversation").tag("")
+                        ForEach(sharedConversations) { Text($0.id).tag($0.id) }
+                    }
+                    ForEach(runtimeCapabilities, id: \.name) { Text($0.description).font(.caption) }
+                    Text(runtimeStatus).font(.caption)
                 }
                 Section("Privacy") {
                     Toggle("Long-term memory", isOn: bindingFor(\.enableLongTermMemory))

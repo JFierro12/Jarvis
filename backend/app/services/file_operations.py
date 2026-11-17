@@ -1,6 +1,6 @@
 import shutil
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 # Reading a whole file into a spoken answer is never useful and can blow up
 # the model's context, so reads are capped and explicitly marked truncated.

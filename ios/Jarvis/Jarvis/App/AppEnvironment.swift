@@ -51,6 +51,19 @@ final class AppEnvironment: ObservableObject {
     /// Not private: `SettingsView` writes to this same Keychain entry when
     /// the user saves a backend auth token.
     static let backendTokenKey = "backend_auth_token"
+    static let approvalTokenKey = "runtime_approval_key"
+    static let conversationKey = "sharedConversationID"
+
+    static func runtimeClient(baseURL: URL) -> SharedRuntimeClient {
+        let authKey = backendTokenKey
+        let approvalKey = approvalTokenKey
+        let sharedConversationKey = conversationKey
+        return SharedRuntimeClient(baseURL: baseURL,
+            tokenProvider: { try? KeychainStore().get(authKey) },
+            approvalProvider: { try? KeychainStore().get(approvalKey) },
+            conversationProvider: { UserDefaults.standard.string(forKey: sharedConversationKey) ?? "" },
+            saveConversation: { UserDefaults.standard.set($0, forKey: sharedConversationKey) })
+    }
     /// Not private: `SettingsView` writes to this same Keychain entry when
     /// the user saves a pc-agent pairing token.
     static let pcAgentTokenKey = "pc_agent_pairing_token"
@@ -140,8 +153,8 @@ final class AppEnvironment: ObservableObject {
                 // constructing a client with no URL. See docs/SETUP_BACKEND.md
                 // for standing up the backend, then pass its URL to
                 // AppEnvironment.makeLive(backendBaseURL:).
-                visionProvider = MockVisionReasoningProvider()
-                languageProvider = MockLanguageReasoningProvider()
+                visionProvider = UnavailableVisionProvider()
+                languageProvider = UnavailableLanguageProvider()
                 textToSpeech = AppleTextToSpeechProvider()
             }
 
@@ -152,16 +165,13 @@ final class AppEnvironment: ObservableObject {
             // vision/language do above when it isn't configured yet.
             let pcAgentTokenProvider: @Sendable () -> String? = { try? Self.keychain.get(Self.pcAgentTokenKey) }
             let pcAgentBaseURLString = UserDefaults.standard.string(forKey: LiveModePreferences.pcAgentBaseURLKey) ?? ""
-            let pcAgentClient: PCAgentClient?
             let handGestureController: HandGestureController
             if configuration.flags.enablePCAgent,
                let pcAgentBaseURL = URL(string: pcAgentBaseURLString),
                let pcAgentToken = pcAgentTokenProvider(), !pcAgentToken.isEmpty {
-                pcAgentClient = URLSessionPCAgentClient(baseURL: pcAgentBaseURL, pairingToken: pcAgentToken)
                 let gestureStreamClient = URLSessionGestureStreamClient(baseURL: pcAgentBaseURL, pairingToken: pcAgentToken)
                 handGestureController = LiveHandGestureController(wearableClient: wearableClient, gestureStreamClient: gestureStreamClient)
             } else {
-                pcAgentClient = nil
                 handGestureController = MockHandGestureController()
             }
 
@@ -172,10 +182,11 @@ final class AppEnvironment: ObservableObject {
                 visionProvider: visionProvider,
                 languageProvider: languageProvider,
                 memoryRepository: memoryRepository,
-                toolExecutor: MockToolExecutor(memoryRepository: memoryRepository, pcAgentClient: pcAgentClient),
+                toolExecutor: UnavailableToolExecutor(),
                 handGestureController: handGestureController,
                 musicPlayerController: AppleMusicPlayerController(),
-                acknowledgmentCuePlayer: SystemSoundAcknowledgmentCuePlayer()
+                acknowledgmentCuePlayer: SystemSoundAcknowledgmentCuePlayer(),
+                sharedRuntime: configuration.backendBaseURL.map { Self.runtimeClient(baseURL: $0) }
             )
         }
 

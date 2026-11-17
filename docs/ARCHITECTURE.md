@@ -1,5 +1,33 @@
 # Architecture
 
+## Shared runtime increment
+
+The new online path uses one personal desktop-hosted runtime. Native iOS keeps
+audio/camera/platform integrations; desktop keeps its webview. Both submit turns
+to `/v2/turns`. The server owns conversation history, provider configuration,
+capability discovery, and policy. The existing local/demo path remains separate.
+
+```mermaid
+flowchart LR
+    Desktop[Desktop UI] --> Runtime[Shared runtime]
+    iOS[iOS client] -->|HTTPS + enrolled session| Runtime
+    Runtime --> Conversations[(SQLite conversations and identities)]
+    Runtime --> Reasoning[Injected reasoning provider]
+    Runtime --> Policy[Deterministic policy]
+    Policy --> Actions[Server-owned actions]
+    UI[Explicit UI approval credential] --> Actions
+    Actions --> Agent[Registered Windows adapter]
+```
+
+The first Windows adapter runs in the native host process and is registered by
+the trusted host. It is not the standalone macOS gesture service. An optional
+private TLS listener shares the same runtime state; an OS file lease rejects
+multiple owners. Approval is session-bound, action IDs are single-use, and
+execution results retain success/failure instead of treating every retry as success.
+See `MILESTONE_2_SETUP.md` for contracts, compatibility, and deployment details.
+
+The diagrams below describe the earlier local/demo flows and hardware layering.
+
 ## System architecture
 
 ```mermaid

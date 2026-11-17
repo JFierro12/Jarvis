@@ -1,14 +1,20 @@
+import sys
+
 from fastapi import Depends, FastAPI, HTTPException, status
 
 from app.commands import COMMAND_DEFINITIONS, execute_command
-from app.gesture_ws import gesture_stream
 from app.ratelimit import enforce_rate_limit
 from app.schemas import CommandResponse, PCStatusResponse
 from app.security import require_pairing_token
 from app.status import collect_status
 
 app = FastAPI(title="JARVIS PC Agent", version="0.1.0")
-app.websocket("/gesture/stream")(gesture_stream)
+
+# Quartz is macOS-only. Unsupported input control is unavailable on Windows,
+# not a startup-time import error or an invented Windows gesture adapter.
+if sys.platform == "darwin":
+    from app.gesture_ws import gesture_stream
+    app.websocket("/gesture/stream")(gesture_stream)
 
 
 @app.get("/status", response_model=PCStatusResponse, dependencies=[Depends(enforce_rate_limit)])

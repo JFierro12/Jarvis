@@ -6,7 +6,7 @@ from typing import Optional
 import psutil
 from fastapi import APIRouter, Depends
 
-from app.core.security import require_bearer_token
+from app.core.security import require_approval_credential, require_bearer_token
 from app.models.schemas import GpuStats, SystemStatsResponse
 from app.services.browser_automation import get_browser_automation_service
 
@@ -66,7 +66,8 @@ def system_stats(_token: str = Depends(require_bearer_token)) -> SystemStatsResp
 
 
 @router.post("/v1/system/terminate")
-async def terminate(_token: str = Depends(require_bearer_token)) -> dict:
+async def terminate(_token: str = Depends(require_bearer_token),
+                    _approval: str = Depends(require_approval_credential)) -> dict:
     """Closes every JARVIS-controlled browser tab and quits the whole app
     process. Deliberately NOT a tool the reasoning model can propose — "Jarvis
     terminate" is matched client-side as a fixed phrase (like the stop-word

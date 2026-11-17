@@ -1,5 +1,12 @@
 # JARVIS
 
+The latest shared-runtime increment is documented in
+[Milestone 2 setup](docs/MILESTONE_2_SETUP.md), with measured checks and remaining
+hardware limitations in [validation](docs/MILESTONE_2_VALIDATION.md). It adds enrolled
+desktop/iPhone sessions, shared conversations, and registered Windows PC control.
+Older capability and test-count descriptions below predate this increment; use
+those two documents for its current scope and migration steps.
+
 A privacy-conscious, voice-first ambient AI assistant prototype for Ray-Ban Meta smart
 glasses + iPhone — the closest realistically achievable approximation of Tony Stark's
 JARVIS using currently-shipping hardware and the Meta Wearables Device Access Toolkit

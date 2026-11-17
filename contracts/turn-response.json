@@ -1,0 +1,12 @@
+{
+  "contract_version": "2",
+  "conversation_id": "conversation-1",
+  "turn_id": "turn-1",
+  "spoken_answer": "Check the paired PC?",
+  "action_id": "action-1",
+  "decision": "require_confirmation",
+  "confirmation_summary": "Approve this exact action on desktop",
+  "provider": "mock",
+  "model": "deterministic-demo",
+  "prompt_version": "jarvis-v2-provenance-1"
+}

@@ -1,10 +1,20 @@
 import json
+import sys
 
 import pytest
 from starlette.websockets import WebSocketDisconnect
 
 import app.gesture_ws as gesture_ws
 from tests.conftest import AUTH_HEADERS
+
+# app/main.py mounts /gesture/stream only on darwin, so off macOS the route
+# under test does not exist and every connect closes as an unmatched path.
+# Skipping is the honest outcome: there is no Windows/Linux Quartz equivalent
+# to exercise, and asserting against an unmounted route would prove nothing.
+pytestmark = pytest.mark.skipif(
+    sys.platform != "darwin",
+    reason="/gesture/stream is mounted only on macOS; no cross-platform gesture route exists",
+)
 
 
 @pytest.fixture(autouse=True)

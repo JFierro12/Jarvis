@@ -22,7 +22,51 @@ pc-agent/.env
 desktop/venv/
 desktop/build/
 desktop/dist/
+desktop/build-milestone2/
+desktop/dist-milestone2/
+desktop/jarvis-self-test.txt
 
 # Misc
 .DS_Store
 *.log
+jarvis-runtime.db*
+*.db.lock
+contracts/*.tmp
+
+# Generated package metadata and local databases: untracked deliberately
+# (files are kept on disk; the tracked jarvis.db held 0 rows).
+*.egg-info/
+jarvis.db
+*.sqlite
+*.sqlite3
+
+# Build artifacts, logs, models and datasets
+desktop/dist/
+desktop/build/
+desktop/venv/
+*.log
+datasets/
+checkpoints/
+*.onnx
+
+# Local model training (code is tracked; weights, datasets and reports are not)
+training/.venv/
+training/data/
+# The generated corpus is versioned by directory name, so `training/data/`
+# alone silently stopped matching it at data-v2. These are regenerable from
+# jarvis_train/generate.py and run to tens of megabytes.
+training/data-v*/
+training/gguf/
+# out/ holds adapter weights and evaluation reports, which stay out of git.
+# The freeze manifests are the exception: they carry the sha256 of every
+# frozen eval split, so a past measurement can still be shown to have run
+# against a particular eval set even though the set itself is not committed.
+# Listed as contents-plus-exception rather than `training/out/`, because git
+# does not descend into an excluded directory and a negation inside one has
+# no effect.
+training/out/*
+!training/out/manifest-*.json
+
+# Self-training job artifacts: datasets and adapters produced by the
+# learning pipeline. Versioned on disk for comparison, never committed.
+training/candidates/

@@ -1,0 +1,21 @@
+[project]
+name = "jarvis-training"
+version = "0.1.0"
+description = "QLoRA pipeline that teaches a local model the JARVIS tool-calling contract"
+requires-python = ">=3.10"
+
+[tool.ruff]
+line-length = 130
+# Unlike backend/ and pc-agent/ (pinned to py39 for their sandboxed
+# interpreters), this package only ever runs in training/.venv, which is built
+# from the host's Python 3.13. Pinning low here would flag nothing useful.
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# The intent tables are long literal data structures, and the dataclass default
+# `lambda s: ""` factories in intents.py are the point of the design: an Intent
+# without a target builder should behave as "no target", not raise.
+"jarvis_train/intents.py" = ["E731"]
