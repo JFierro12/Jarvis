@@ -17,12 +17,38 @@ accepted limitation, not a bug to chase further.
 
 from typing import Callable, Optional, Tuple
 
-import Quartz
+try:
+    import Quartz
+except ImportError:  # pragma: no cover - only reachable on non-macOS hosts
+    # This module is macOS-only by design, but importing it must not crash
+    # the whole app (or test collection) on Windows/Linux. pc-agent's other
+    # routes - the fixed-argv command allowlist, status, auth - are
+    # cross-platform and have to stay reachable. Same lazy-import treatment
+    # pywinauto gets on the Windows side.
+    Quartz = None  # type: ignore[assignment]
 
 Poster = Callable[[object], None]
 
 
+class GestureUnavailableError(RuntimeError):
+    """Cursor synthesis was requested on a host that cannot perform it."""
+
+
+def is_available() -> bool:
+    """True only where real CGEvent synthesis is possible."""
+    return Quartz is not None
+
+
+def _require_quartz() -> None:
+    if Quartz is None:
+        raise GestureUnavailableError(
+            "Cursor and gesture synthesis requires macOS Quartz (pyobjc); "
+            "this host cannot synthesize input events."
+        )
+
+
 def get_cursor_position() -> Tuple[float, float]:
+    _require_quartz()
     event = Quartz.CGEventCreate(None)
     location = Quartz.CGEventGetLocation(event)
     return (location.x, location.y)
@@ -48,6 +74,7 @@ def _post(event, poster: Optional[Poster]) -> None:
 
 
 def move_cursor_relative(dx: float, dy: float, poster: Optional[Poster] = None) -> None:
+    _require_quartz()
     current_x, current_y = get_cursor_position()
     target_x, target_y = _clamp_to_screen(current_x + dx, current_y + dy)
     event = Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventMouseMoved, (target_x, target_y), Quartz.kCGMouseButtonLeft)
@@ -55,6 +82,7 @@ def move_cursor_relative(dx: float, dy: float, poster: Optional[Poster] = None) 
 
 
 def click(poster: Optional[Poster] = None) -> None:
+    _require_quartz()
     x, y = get_cursor_position()
     down = Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventLeftMouseDown, (x, y), Quartz.kCGMouseButtonLeft)
     up = Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventLeftMouseUp, (x, y), Quartz.kCGMouseButtonLeft)
@@ -63,11 +91,13 @@ def click(poster: Optional[Poster] = None) -> None:
 
 
 def scroll(dy: float, poster: Optional[Poster] = None) -> None:
+    _require_quartz()
     event = Quartz.CGEventCreateScrollWheelEvent(None, Quartz.kCGScrollEventUnitPixel, 1, int(dy))
     _post(event, poster)
 
 
 def zoom(delta: float, poster: Optional[Poster] = None) -> None:
+    _require_quartz()
     event = Quartz.CGEventCreateScrollWheelEvent(None, Quartz.kCGScrollEventUnitPixel, 1, int(delta))
     Quartz.CGEventSetFlags(event, Quartz.kCGEventFlagMaskCommand)
     _post(event, poster)

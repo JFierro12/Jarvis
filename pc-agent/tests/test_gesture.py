@@ -1,3 +1,14 @@
+# ruff: noqa: E402 - the importorskip below must run before app.gesture is
+# imported, because these tests monkeypatch real Quartz attributes and cannot
+# run on a host without pyobjc. Keeping the import at the top of the file
+# would break collection on Windows/Linux instead of skipping cleanly.
+import pytest
+
+pytest.importorskip(
+    "Quartz",
+    reason="Quartz (pyobjc) is macOS-only; real CGEvent synthesis cannot be exercised on this host",
+)
+
 import app.gesture as gesture
 
 

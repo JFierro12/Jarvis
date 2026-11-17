@@ -17,6 +17,10 @@ _connection_active = False
 
 async def gesture_stream(websocket: WebSocket, settings: Settings = Depends(get_settings)) -> None:
     global _connection_active
+    origin = websocket.headers.get("origin")
+    if origin and origin not in {v.strip() for v in settings.allowed_origins.split(",") if v.strip()}:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
 
     # HTTPBearer/require_pairing_token expect an HTTP Request, not a
     # WebSocket, so auth is validated directly against the handshake
